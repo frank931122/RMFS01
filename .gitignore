@@ -1,0 +1,50 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Packaging/build
+build/
+dist/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Data/results
+*.csv
+*.json
+*.pkl
+*.pickle
+*.npz
+*.npy
+*.h5
+
+# Archives
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+
+# Gurobi
+*.lp
+*.mps
+*.sol
+*.ilp
+gurobi.lic
+gurobi.log
+pythonProject5/solution_exports/

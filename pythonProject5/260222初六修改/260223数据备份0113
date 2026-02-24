@@ -1,0 +1,613 @@
+C:\Users\16415\AppData\Local\Programs\Python\Python314\python.exe C:\Users\16415\Desktop\pythonProject15\pythonProject5\main.py --prefix demo01 --gammas 0,5,10,15 --alns-iters 4000 --cross-gamma-check --export-eval-diag
+[MAP] 读取场景: W=9,H=7, WS=[11, 38], #SP=12, #Shelf=6, #AGV=3
+[TASK] 读取 tasks.csv 行数=40, WS集合=[np.int64(1), np.int64(2)]
+[WARN] 这次 tasks.csv 有 40 个任务（你期望 11 个），继续求解…
+[WSOrder] 固定顺序： {1: [1, 2, 3, 4, 6, 9, 11, 12, 13, 16, 19, 20, 23, 24, 25, 26, 30, 34, 37, 38, 39, 40], 2: [5, 7, 8, 10, 14, 15, 17, 18, 21, 22, 27, 28, 29, 31, 32, 33, 35, 36]}
+[Scenario] |J|=40 |R|=3 |S|=12 |K|=2 Γ=0
+  j=1: WS=1, D=7.0, S_cand(top)=[14, 15, 23, 16, 24]
+  j=2: WS=1, D=5.0, S_cand(top)=[14, 15, 23, 16, 24]
+  j=3: WS=1, D=10.0, S_cand(top)=[14, 15, 23, 16, 24]
+[EXPORT] 写出 solution_exports/demo01_taskInfo.csv, solution_exports/demo01_taskShelf.csv
+[CHECK] v-arc consistency passed.
+
+======================================================================
+[RUN] 开始 ALNS：γ = 0
+======================================================================
+[ALNS] Start: iters=4000, gamma=0
+[WARN] task_shelf_mapping 中有 6 条记录为 None/NaN/非法值，已忽略（这些任务将尝试从 shelf_seq 反推 chain）。
+[ALNS-inner] init_obj = 35000066.00 | init_infeas=(35, 0, 0)
+[ALNS-inner] iter 100/4000 | cur=inf | best=inf | stall=94 | T=2.5000 | post=0
+[ALNS-adapt] destroy top = [('shaw_related', 0.9821538461538464), ('rand_small', 0.9505882352941177), ('robust_sensitive', 0.85), ('chain', 0.7868235294117647)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0991304347826087), ('repair_unordered', 0.8533333333333334)]
+[ALNS-inner] iter 200/4000 | cur=432.00 | best=432.00 | stall=19 | T=2.2729 | post=0
+[ALNS-adapt] destroy top = [('ws_idle_gap', 1.2858), ('shaw_related', 0.9585784615384618), ('robust_sensitive', 0.85), ('rand_small', 0.6083764705882354)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0639990338164251), ('repair_unordered', 0.5461333333333335)]
+[ALNS-inner] iter 300/4000 | cur=394.00 | best=394.00 | stall=29 | T=2.1618 | post=0
+[ALNS-adapt] destroy top = [('shaw_related', 1.0534902153846155), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.8229120000000001), ('rand_big', 0.6)]
+[ALNS-adapt] repair  top = [('repair_unordered', 0.8572176410256411), ('repair_ordered', 0.6809593816425121)]
+[ALNS-inner] iter 400/4000 | cur=376.00 | best=376.00 | stall=6 | T=2.4259 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 6.79922944), ('ws_idle_gap', 2.72666368), ('robust_sensitive', 0.85), ('shaw_related', 0.674233737846154)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0358140042512078), ('repair_unordered', 0.5486192902564103)]
+[ALNS-inner] iter 500/4000 | cur=362.00 | best=362.00 | stall=22 | T=2.2390 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 4.351506841600001), ('ws_idle_gap', 3.0650647552000008), ('robust_sensitive', 0.85), ('rand_big', 0.6)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8164093348137963), ('repair_unordered', 0.35111634576410267)]
+[ALNS-inner] iter 600/4000 | cur=362.00 | best=362.00 | stall=2 | T=5.9402 | post=23
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 2.964964378624001), ('ws_idle_gap', 2.2605425422291), ('ws_critical', 2.1972864000000003), ('robust_sensitive', 0.85)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7796448314236869), ('repair_unordered', 0.28089307661128216)]
+[ALNS-inner] iter 700/4000 | cur=421.00 | best=362.00 | stall=102 | T=3.5984 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 2.3364007317311257), ('ws_critical', 2.059475965683258), ('ws_idle_gap', 1.566747227026624), ('robust_sensitive', 0.85)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9003060254444931), ('repair_unordered', 0.22471446128902572)]
+[ALNS-inner] iter 800/4000 | cur=10267.00 | best=362.00 | stall=82 | T=3.9778 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.0637789037515715), ('chain', 1.8540701012247494), ('ws_gap_bundle', 1.7494141153667444), ('ws_idle_gap', 1.0027182252970395)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9744937286249014), ('repair_unordered', 0.3038172552249765)]
+[ALNS-inner] iter 900/4000 | cur=354.00 | best=354.00 | stall=5 | T=4.3973 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 3.502923761558901), ('chain', 1.4920594102383853), ('ws_gap_bundle', 1.2505341247438073), ('ws_idle_gap', 1.0257396641901053)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3117610927029157), ('repair_unordered', 0.6744430433439851)]
+[ALNS-inner] iter 1000/4000 | cur=inf | best=354.00 | stall=105 | T=2.6637 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.4251679106943995), ('chain', 1.0749180225525667), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.8003418398360367)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9338353997251231), ('repair_unordered', 0.43164354774015046)]
+[ALNS-inner] iter 1100/4000 | cur=339.00 | best=339.00 | stall=19 | T=3.9184 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 3.183949568107574), ('robust_sensitive', 0.85), ('chain', 0.6879475344336428), ('ws_gap_bundle', 0.6402734718688294)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0689590036501657), ('repair_unordered', 0.2762518705536963)]
+[ALNS-inner] iter 1200/4000 | cur=337.00 | best=337.00 | stall=75 | T=2.5000 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 3.8499016366323264), ('robust_sensitive', 0.85), ('rand_big', 0.6), ('ws_gap_bundle', 0.5122187774950636)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8379142501409842), ('repair_unordered', 0.17680119715436568)]
+[ALNS-inner] iter 1300/4000 | cur=360.00 | best=337.00 | stall=55 | T=4.5543 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 3.197605001112643), ('robust_sensitive', 0.85), ('rand_big', 0.48), ('ws_idle_gap', 0.33611437316181386)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9864438434944853), ('repair_unordered', 0.14144095772349255)]
+[ALNS-inner] iter 1400/4000 | cur=337.00 | best=337.00 | stall=35 | T=5.0345 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.7136199100716976), ('ws_idle_gap', 0.911113198823561), ('robust_sensitive', 0.85), ('rand_big', 0.48)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1405240598364705), ('repair_unordered', 0.11315276617879405)]
+[ALNS-inner] iter 1500/4000 | cur=333.00 | best=333.00 | stall=11 | T=3.0498 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 3.787625833354978), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.6267488108834427), ('rand_big', 0.48)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1640170309484024), ('repair_unordered', 0.0724177703544282)]
+[ALNS-inner] iter 1600/4000 | cur=inf | best=333.00 | stall=111 | T=2.5000 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.571772841039494), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.6642400506929064), ('rand_big', 0.48)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8233382467457532), ('repair_unordered', 0.05793421628354256)]
+[ALNS-inner] iter 1700/4000 | cur=394.00 | best=331.00 | stall=82 | T=3.8023 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.3230774754081334), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.6808953911723228), ('ws_gap_bundle', 0.5108279181577459)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9289364779172822), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1800/4000 | cur=328.00 | best=328.00 | stall=47 | T=4.3973 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.6976786751702964), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.43577305035028663), ('rand_big', 0.384)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1247724070915504), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1900/4000 | cur=328.00 | best=328.00 | stall=27 | T=5.2405 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.3123967050501664), ('robust_sensitive', 0.85), ('rand_big', 0.384), ('ws_idle_gap', 0.2788947522241835)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1182543405385923), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2000/4000 | cur=331.00 | best=328.00 | stall=7 | T=5.7931 | post=18
+[ALNS-adapt] destroy top = [('ws_critical', 1.6617972452693737), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.6584926414234775), ('ws_gap_bundle', 0.4939104737775442)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.86507053304674), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2100/4000 | cur=366.00 | best=328.00 | stall=107 | T=3.5093 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.529264522686685), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.4714352905110256), ('rand_big', 0.384)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7934002431907301), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2200/4000 | cur=353.00 | best=328.00 | stall=87 | T=3.8794 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.77167948609036), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.6817185859270565), ('ws_gap_bundle', 0.5623057300592822)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0396945229890062), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2300/4000 | cur=326.00 | best=326.00 | stall=16 | T=4.2884 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.282446299669259), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.5814141287764022), ('ws_idle_gap', 0.5453748687416452)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.198204494712964), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2400/4000 | cur=373.00 | best=326.00 | stall=116 | T=2.5978 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.183842554865249), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.7463907567026118), ('ws_idle_gap', 0.34903991599465295)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1978296000205522), ('repair_unordered', 0.24000000000000002)]
+[ALNS-inner] iter 2500/4000 | cur=317.00 | best=317.00 | stall=39 | T=3.7082 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.6972046896592143), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.4776900842896716), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0576153972541233), ('repair_unordered', 0.15360000000000004)]
+[ALNS-inner] iter 2600/4000 | cur=342.00 | best=315.00 | stall=96 | T=2.5000 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.856760451931348), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.5628645110882471), ('ws_idle_gap', 0.37338554623657794)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.09578294515173), ('repair_unordered', 0.12288000000000004)]
+[ALNS-inner] iter 2700/4000 | cur=312.00 | best=312.00 | stall=23 | T=4.0993 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 4.33601899692837), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.4502916088705977), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0847793457666726), ('repair_unordered', 0.09830400000000004)]
+[ALNS-inner] iter 2800/4000 | cur=371.00 | best=310.00 | stall=82 | T=2.5000 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 8.475052158034158), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.36023328709647817), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.2127256802453745), ('repair_unordered', 0.06291456000000004)]
+[ALNS-inner] iter 2900/4000 | cur=309.00 | best=309.00 | stall=2 | T=4.3973 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 6.278031913790431), ('robust_sensitive', 0.85), ('rand_big', 0.30720000000000003), ('ws_gap_bundle', 0.23054930374174606)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.4001444353570398), ('repair_unordered', 0.06291456000000004)]
+[ALNS-inner] iter 3000/4000 | cur=354.00 | best=309.00 | stall=102 | T=2.6637 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 4.530280850357791), ('ws_gap_bundle', 1.984439442993397), ('robust_sensitive', 0.85), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3858883569958524), ('repair_unordered', 0.050331648000000034)]
+[ALNS-inner] iter 3100/4000 | cur=317.00 | best=309.00 | stall=82 | T=3.9778 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 3.339330116437423), ('ws_gap_bundle', 1.400950334424865), ('robust_sensitive', 0.85), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1699726301099986), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3200/4000 | cur=341.00 | best=309.00 | stall=62 | T=4.3973 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.8122291895778657), ('ws_gap_bundle', 1.4277970252207248), ('robust_sensitive', 0.85), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.2335824832703992), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3300/4000 | cur=326.00 | best=309.00 | stall=42 | T=4.8609 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.685931944487729), ('ws_gap_bundle', 1.0423615247126925), ('robust_sensitive', 0.85), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3486927892930556), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3400/4000 | cur=328.00 | best=309.00 | stall=22 | T=5.3735 | post=3
+[ALNS-adapt] destroy top = [('ws_critical', 2.3060234714991736), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.7707477394524869), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3191633851475557), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3500/4000 | cur=309.00 | best=309.00 | stall=2 | T=5.9402 | post=23
+[ALNS-adapt] destroy top = [('ws_critical', 2.0602550217594713), ('ws_gap_bundle', 0.9640477840188225), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.272073574197704)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3046049920263507), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3600/4000 | cur=406.00 | best=309.00 | stall=102 | T=3.5984 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.02713464249749), ('ws_gap_bundle', 1.2446828894643542), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.6676588593581632)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.4643349499989053), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3700/4000 | cur=inf | best=309.00 | stall=82 | T=3.9778 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.5906995045317271), ('ws_gap_bundle', 0.9032637159238535), ('robust_sensitive', 0.85), ('ws_idle_gap', 0.4273016699892245)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1099743679992995), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3800/4000 | cur=320.00 | best=309.00 | stall=62 | T=4.3973 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.971381016233639), ('robust_sensitive', 0.85), ('ws_gap_bundle', 0.8455173496198378), ('ws_idle_gap', 0.2734730687931037)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1403264526624088), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3900/4000 | cur=344.00 | best=309.00 | stall=42 | T=4.8609 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.0077891135474237), ('ws_gap_bundle', 1.1811311037566963), ('robust_sensitive', 0.85), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.220094643989656), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 4000/4000 | cur=344.00 | best=309.00 | stall=22 | T=5.3735 | post=3
+[ALNS-adapt] destroy top = [('ws_critical', 2.0943356820210006), ('ws_gap_bundle', 1.4174623679427472), ('robust_sensitive', 0.85), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.43846057215338), ('repair_unordered', 0.05)]
+[ALNS-inner] best_obj after SA = 309.00
+[ALNS-inner] final_best_obj = 309.00
+[Lv0-Check] 基础结构检查通过（routes / shelf_seq / place 一致性良好）
+[ALNS] Done: best structure found for γ=0.
+[Profiler γ=0] evaluate calls=918719 | total=988.410s | avg=1.076ms
+[ALNS] Exact makespan: base=inf → best=309.00 (Δ=+inf)
+[WarmStart] WS-block fix re-eval (Exact): makespan=309.00
+[SIGMA] srcG=0 cell=23 order=[2, 4, 11, 16, 19, 26, 37]
+[ALNS] saved bundle -> solution_exports\demo01_alns_bundle_gamma0.json
+
+[EXPORT-EVAL] evaluator diagnostics exported:
+  - diag_json: solution_exports\demo01_alns_bundle_srcG0_evalG0_diag.json
+  - pq_csv: solution_exports\demo01_alns_bundle_srcG0_evalG0_pq.csv
+  - timeline_csv: solution_exports\demo01_alns_bundle_srcG0_evalG0_timeline.csv
+  - robust_segments_csv: solution_exports\demo01_alns_bundle_srcG0_evalG0_robust_segments.csv
+  - v_arcs_csv: solution_exports\demo01_alns_bundle_srcG0_evalG0_v_arcs.csv
+  - end_shelf_final_csv: solution_exports\demo01_alns_bundle_srcG0_evalG0_end_shelf_final.csv
+
+[EXPORT-EVAL] ALNS diag exported for γ=0
+
+======================================================================
+[RUN] 开始 ALNS：γ = 5
+======================================================================
+[ALNS] Start: iters=4000, gamma=5
+[WARN] task_shelf_mapping 中有 6 条记录为 None/NaN/非法值，已忽略（这些任务将尝试从 shelf_seq 反推 chain）。
+[ALNS-inner] init_obj = 431.00 | init_infeas=(0, 0, 0)
+[ALNS-inner] iter 100/4000 | cur=499.00 | best=431.00 | stall=100 | T=2.5000 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 2.255692307692308), ('ws_idle_gap', 1.026), ('robust_sensitive', 0.8880000000000001), ('rand_small', 0.6742857142857144)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9222727272727274), ('repair_unordered', 0.6682352941176471)]
+[ALNS-inner] iter 200/4000 | cur=519.00 | best=431.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.657357362637363), ('ws_idle_gap', 1.0166400000000002), ('rand_big', 0.6), ('robust_sensitive', 0.5683200000000002)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7102545454545456), ('repair_unordered', 0.4276705882352942)]
+[ALNS-inner] iter 300/4000 | cur=676.00 | best=431.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.9966080000000002), ('ws_gap_bundle', 1.4388905302697306), ('ws_idle_gap', 0.7986496000000003), ('rand_small', 0.5661874285714288)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6712032252964428), ('repair_unordered', 0.2737091764705883)]
+[ALNS-inner] iter 400/4000 | cur=inf | best=431.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.8078291200000003), ('ws_gap_bundle', 1.1933711423801463), ('ws_idle_gap', 0.6389196800000003), ('rand_big', 0.384)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6756977237641916), ('repair_unordered', 0.21896734117647065)]
+[ALNS-inner] iter 500/4000 | cur=inf | best=431.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('ws_critical', 2.24086090417968), ('rand_small', 2.031910370742857), ('ws_gap_bundle', 1.1557575311232937), ('ws_idle_gap', 0.9189085952000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0983084624448622), ('repair_unordered', 0.14013909835294122)]
+[ALNS-inner] iter 600/4000 | cur=530.00 | best=431.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.6872418877659043), ('rand_small', 1.3004226372754288), ('ws_gap_bundle', 0.739684819918908), ('ws_idle_gap', 0.5881015009280003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7825353056737872), ('repair_unordered', 0.0896890229458824)]
+[ALNS-inner] iter 700/4000 | cur=526.00 | best=431.00 | stall=100 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.8267866798279329), ('ws_gap_bundle', 0.9733982847481012), ('rand_small', 0.8322704878562744), ('ws_idle_gap', 0.37638496059392024)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8703058783059958), ('repair_unordered', 0.05740097468536474)]
+[ALNS-inner] iter 800/4000 | cur=463.00 | best=431.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.4091434750898773), ('ws_gap_bundle', 0.9315463308102134), ('rand_small', 0.5695761891510926), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7297957621158374), ('repair_unordered', 0.05740097468536474)]
+[ALNS-inner] iter 900/4000 | cur=inf | best=431.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.0018518240575216), ('ws_gap_bundle', 0.6441896517185367), ('rand_small', 0.5085287610566994), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.5296779834063099), ('repair_unordered', 0.39673662379863345)]
+[ALNS-inner] iter 1000/4000 | cur=431.00 | best=431.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.0344159366275831), ('chain', 0.6400000000000001), ('ws_gap_bundle', 0.4789480437665302), ('rand_small', 0.32545840707628765)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.5561367665228956), ('repair_unordered', 0.2539114392311254)]
+[ALNS-inner] iter 1100/4000 | cur=431.00 | best=431.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('ws_critical', 0.786788104203558), ('chain', 0.7096000000000002), ('ws_idle_gap', 0.3986670591099327), ('ws_gap_bundle', 0.3665267480105794)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.5313282274387647), ('repair_unordered', 0.1625033211079203)]
+[ALNS-inner] iter 1200/4000 | cur=30085.00 | best=431.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 0.8308171139630045), ('chain', 0.45414400000000016), ('rand_big', 0.30720000000000003), ('ws_idle_gap', 0.255146917830357)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.5036864291971731), ('repair_unordered', 0.10400212550906901)]
+[ALNS-inner] iter 1300/4000 | cur=580.00 | best=431.00 | stall=100 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.0376570188703889), ('ws_idle_gap', 0.5061511702685714), ('ws_gap_bundle', 0.3901293559851334), ('chain', 0.38065216000000013)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6627674779514969), ('repair_unordered', 0.06656136032580418)]
+[ALNS-inner] iter 1400/4000 | cur=552.00 | best=431.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.4931914011679581), ('ws_idle_gap', 1.0125081775433142), ('ws_gap_bundle', 0.8239685021161997), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8670446552767133), ('repair_unordered', 0.05324908826064334)]
+[ALNS-inner] iter 1500/4000 | cur=513.00 | best=431.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_idle_gap', 1.1880052336277211), ('ws_critical', 1.184213925318922), ('ws_gap_bundle', 0.6273398413543678), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7306473548873006), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1600/4000 | cur=431.00 | best=431.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.2202498533805806), ('ws_idle_gap', 0.9203233495217417), ('ws_gap_bundle', 0.4014974984667954), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7138836948829745), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1700/4000 | cur=527.00 | best=430.00 | stall=55 | T=2.9743 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.235742514859224), ('ws_idle_gap', 0.9490069436939148), ('ws_gap_bundle', 0.45695839901874913), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7244333908120604), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1800/4000 | cur=inf | best=430.00 | stall=35 | T=5.0345 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.1497323523670462), ('ws_idle_gap', 0.6073644439641055), ('ws_gap_bundle', 0.4724533753719995), ('shaw_related', 0.4)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6868373701197187), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1900/4000 | cur=434.00 | best=430.00 | stall=15 | T=5.5654 | post=10
+[ALNS-adapt] destroy top = [('ws_critical', 0.8858287055149097), ('ws_idle_gap', 0.38871324413702757), ('ws_gap_bundle', 0.3023701602380797), ('shaw_related', 0.25600000000000006)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.51157591687662), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2000/4000 | cur=30377.00 | best=430.00 | stall=115 | T=3.3714 | post=0
+[ALNS-adapt] destroy top = [('shaw_related', 1.0638400000000001), ('ws_critical', 1.026060806312151), ('ws_gap_bundle', 0.6801835692190378), ('ws_idle_gap', 0.24877647624769766)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6413677704745062), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2100/4000 | cur=10014.00 | best=430.00 | stall=95 | T=3.7269 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.5457698251306862), ('ws_gap_bundle', 1.0113174843001842), ('shaw_related', 0.6808576000000002), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8112753731036839), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2200/4000 | cur=469.00 | best=430.00 | stall=75 | T=4.1199 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.6763472335381846), ('ws_gap_bundle', 0.8638665665754947), ('shaw_related', 0.5957488640000002), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9176162387863579), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2300/4000 | cur=442.00 | best=430.00 | stall=55 | T=4.5543 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.8317193723215812), ('ws_gap_bundle', 1.1874899872237012), ('shaw_related', 0.38127927296000014), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.033396841802861), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2400/4000 | cur=inf | best=430.00 | stall=35 | T=5.0345 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.6273003982858123), ('ws_gap_bundle', 0.869084500914078), ('shaw_related', 0.4440187346944001), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9397739787538311), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2500/4000 | cur=434.00 | best=430.00 | stall=15 | T=5.5654 | post=10
+[ALNS-adapt] destroy top = [('ws_critical', 1.5909672043978698), ('ws_gap_bundle', 1.0316207791496033), ('shaw_related', 0.28417199020441614), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9936839178310235), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2600/4000 | cur=514.00 | best=430.00 | stall=115 | T=3.3714 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.9272133182150162), ('ws_gap_bundle', 1.0653655037839513), ('rand_big', 0.19660800000000003), ('shaw_related', 0.18187007373082634)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1842842380241), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2700/4000 | cur=541.00 | best=430.00 | stall=95 | T=3.7269 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.9838867430933473), ('ws_gap_bundle', 0.8677162753629055), ('shaw_related', 0.22716607795695964), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.252341912335424), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2800/4000 | cur=535.00 | best=430.00 | stall=75 | T=4.1199 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.092515798408025), ('ws_gap_bundle', 0.9774363183301618), ('rand_big', 0.15728640000000005), ('shaw_related', 0.1453862898924542)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.2862988238946715), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2900/4000 | cur=520.00 | best=430.00 | stall=55 | T=4.5543 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.463557937068093), ('ws_gap_bundle', 1.7322259103979705), ('rand_big', 0.15728640000000005), ('shaw_related', 0.09304722553117069)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.6488312472925897), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3000/4000 | cur=668.00 | best=430.00 | stall=35 | T=5.0345 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.22467707972358), ('ws_gap_bundle', 1.3229102969404156), ('rand_small', 0.4), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.5019519982672576), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3100/4000 | cur=10093.00 | best=430.00 | stall=15 | T=5.5654 | post=10
+[ALNS-adapt] destroy top = [('ws_critical', 2.0486209172299876), ('ws_gap_bundle', 1.3728164361957123), ('rand_small', 0.25600000000000006), ('rand_big', 0.12582912000000004)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.4373309115441062), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3200/4000 | cur=518.00 | best=430.00 | stall=115 | T=3.3714 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.373198834990993), ('ws_idle_gap', 1.84), ('ws_gap_bundle', 1.326181466533677), ('shaw_related', 0.19200000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.563091783388228), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3300/4000 | cur=687.00 | best=430.00 | stall=95 | T=3.7269 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.0533927089396906), ('chain', 1.84), ('ws_idle_gap', 1.6276000000000002), ('ws_gap_bundle', 0.8856792155046304)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.396378741368466), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3400/4000 | cur=431.00 | best=430.00 | stall=75 | T=4.1199 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.5991713337214022), ('chain', 1.1776000000000002), ('ws_idle_gap', 1.0416640000000001), ('ws_gap_bundle', 0.7468346979229635)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0036415781492876), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3500/4000 | cur=519.00 | best=430.00 | stall=55 | T=4.5543 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.579161961274005), ('ws_gap_bundle', 1.2836884923849827), ('chain', 0.7536640000000002), ('ws_idle_gap', 0.6666649600000002)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8623306100155442), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3600/4000 | cur=10107.00 | best=430.00 | stall=35 | T=5.0345 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.215369537568305), ('ws_gap_bundle', 1.3615606351263891), ('chain', 0.6589163885714288), ('ws_idle_gap', 0.42666557440000014)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1238064840269697), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3700/4000 | cur=500.00 | best=430.00 | stall=15 | T=5.5654 | post=10
+[ALNS-adapt] destroy top = [('ws_critical', 1.8404451996958893), ('ws_gap_bundle', 1.366398806480889), ('chain', 0.5217064886857145), ('ws_idle_gap', 0.2730659676160001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0758075783486893), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3800/4000 | cur=456.00 | best=430.00 | stall=115 | T=3.3714 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.7008795802117864), ('ws_gap_bundle', 1.0030666647191977), ('ws_idle_gap', 0.39976221927424005), ('chain', 0.3338921527588573)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9823944011635695), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3900/4000 | cur=inf | best=430.00 | stall=95 | T=3.7269 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.2805629313355436), ('ws_gap_bundle', 0.6819626654202866), ('chain', 0.30369097776566867), ('ws_idle_gap', 0.2558478203355136)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.726691600418154), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 4000/4000 | cur=inf | best=430.00 | stall=75 | T=4.1199 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.011560276054748), ('ws_gap_bundle', 0.7564561058689835), ('chain', 0.306862225770028), ('ws_idle_gap', 0.16374260501472873)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6546826242676186), ('repair_unordered', 0.05)]
+[ALNS-inner] best_obj after SA = 430.00
+[ALNS-inner] final_best_obj = 430.00
+[Lv0-Check] 基础结构检查通过（routes / shelf_seq / place 一致性良好）
+[ALNS] Done: best structure found for γ=5.
+[Profiler γ=5] evaluate calls=1000968 | total=1331.149s | avg=1.330ms
+[ALNS] Exact makespan: base=inf → best=430.00 (Δ=+inf)
+[WarmStart] WS-block fix re-eval (Exact): makespan=430.00
+[SIGMA] srcG=5 cell=23 order=[1, 2, 4, 11, 16, 19, 26]
+[ALNS] saved bundle -> solution_exports\demo01_alns_bundle_gamma5.json
+
+[EXPORT-EVAL] evaluator diagnostics exported:
+  - diag_json: solution_exports\demo01_alns_bundle_srcG5_evalG5_diag.json
+  - pq_csv: solution_exports\demo01_alns_bundle_srcG5_evalG5_pq.csv
+  - timeline_csv: solution_exports\demo01_alns_bundle_srcG5_evalG5_timeline.csv
+  - robust_segments_csv: solution_exports\demo01_alns_bundle_srcG5_evalG5_robust_segments.csv
+  - v_arcs_csv: solution_exports\demo01_alns_bundle_srcG5_evalG5_v_arcs.csv
+  - end_shelf_final_csv: solution_exports\demo01_alns_bundle_srcG5_evalG5_end_shelf_final.csv
+
+[EXPORT-EVAL] ALNS diag exported for γ=5
+
+======================================================================
+[RUN] 开始 ALNS：γ = 10
+======================================================================
+[ALNS] Start: iters=4000, gamma=10
+[WARN] task_shelf_mapping 中有 6 条记录为 None/NaN/非法值，已忽略（这些任务将尝试从 shelf_seq 反推 chain）。
+[ALNS-inner] init_obj = 444.00 | init_infeas=(0, 0, 0)
+[ALNS-inner] iter 100/4000 | cur=10472.00 | best=444.00 | stall=100 | T=2.5000 | post=0
+[ALNS-adapt] destroy top = [('ws_idle_gap', 0.8760000000000001), ('ws_critical', 0.8), ('shaw_related', 0.6426666666666667), ('rand_small', 0.6400000000000001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.742439024390244), ('repair_unordered', 0.6400000000000001)]
+[ALNS-inner] iter 200/4000 | cur=460.00 | best=444.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.4420000000000002), ('ws_idle_gap', 0.5606400000000001), ('robust_sensitive', 0.4921600000000001), ('rand_big', 0.48)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7424030018761727), ('repair_unordered', 0.40960000000000013)]
+[ALNS-inner] iter 300/4000 | cur=482.00 | best=444.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.6031701333333337), ('ws_critical', 1.3428800000000003), ('rand_big', 0.48), ('ws_idle_gap', 0.3588096000000001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7777735801154794), ('repair_unordered', 0.2621440000000001)]
+[ALNS-inner] iter 400/4000 | cur=inf | best=444.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.4460288853333336), ('ws_critical', 1.1506320111888115), ('robust_sensitive', 0.6015887360000001), ('rand_big', 0.48)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.761775091273907), ('repair_unordered', 0.2097152000000001)]
+[ALNS-inner] iter 500/4000 | cur=10090.00 | best=444.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.3842410953089856), ('ws_critical', 1.2147261654825177), ('rand_big', 0.48), ('robust_sensitive', 0.3850167910400001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8171530796918963), ('repair_unordered', 0.1677721600000001)]
+[ALNS-inner] iter 600/4000 | cur=589.00 | best=444.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.2360241911076408), ('ws_critical', 1.14999617448024), ('rand_big', 0.48), ('rand_small', 0.44243376245028576)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7947167465130178), ('repair_unordered', 0.13421772800000006)]
+[ALNS-inner] iter 700/4000 | cur=599.00 | best=440.00 | stall=89 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.4596339153037174), ('ws_gap_bundle', 1.0510554823088902), ('robust_sensitive', 0.556902877609984), ('rand_big', 0.48)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8566187177683314), ('repair_unordered', 0.10737418240000006)]
+[ALNS-inner] iter 800/4000 | cur=inf | best=440.00 | stall=69 | T=4.2456 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.4284514200800937), ('ws_gap_bundle', 1.079406277908459), ('ws_idle_gap', 0.5552478270259201), ('robust_sensitive', 0.48498927024181837)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9294604691676505), ('repair_unordered', 0.06871947673600004)]
+[ALNS-inner] iter 900/4000 | cur=518.00 | best=440.00 | stall=49 | T=4.6933 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.8175422421845935), ('ws_gap_bundle', 1.3606381996795958), ('ws_idle_gap', 0.5153586092965889), ('robust_sensitive', 0.40639313295476376)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1108547002672964), ('repair_unordered', 0.06871947673600004)]
+[ALNS-inner] iter 1000/4000 | cur=30193.00 | best=440.00 | stall=29 | T=5.1882 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.1498937016648068), ('ws_gap_bundle', 1.5508084477949413), ('ws_idle_gap', 0.5043749644952714), ('robust_sensitive', 0.4658058908053345)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3445470081710698), ('repair_unordered', 0.06871947673600004)]
+[ALNS-inner] iter 1100/4000 | cur=10132.00 | best=440.00 | stall=9 | T=5.7353 | post=16
+[ALNS-adapt] destroy top = [('ws_critical', 2.1407166580606916), ('ws_gap_bundle', 1.3155943296656856), ('rand_small', 0.8220514180547099), ('rand_big', 0.384)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3141100852294847), ('repair_unordered', 0.054975581388800036)]
+[ALNS-inner] iter 1200/4000 | cur=474.00 | best=440.00 | stall=109 | T=3.4743 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.075449965506669), ('ws_gap_bundle', 1.2573649863706542), ('ws_idle_gap', 0.8582399818215791), ('rand_small', 0.5261129075550145)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.2651937198529928), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1300/4000 | cur=429.00 | best=429.00 | stall=39 | T=3.8407 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 5.451145120781412), ('ws_gap_bundle', 1.091606274810809), ('ws_idle_gap', 0.5492735883658106), ('rand_big', 0.384)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.184417858256936), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1400/4000 | cur=10149.00 | best=429.00 | stall=19 | T=5.4549 | post=6
+[ALNS-adapt] destroy top = [('ws_critical', 3.6311763162141313), ('ws_gap_bundle', 0.9986280158789179), ('ws_idle_gap', 0.35153509655411885), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8951702864272962), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1500/4000 | cur=591.00 | best=429.00 | stall=119 | T=3.3044 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 3.0284234306123383), ('ws_gap_bundle', 0.7471219301625076), ('rand_big', 0.30720000000000003), ('ws_idle_gap', 0.22498246179463607)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9424964778857667), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1600/4000 | cur=488.00 | best=429.00 | stall=99 | T=3.6529 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.75626791866882), ('ws_gap_bundle', 1.148158035304005), ('rand_big', 0.24576000000000003), ('ws_idle_gap', 0.17998596943570888)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.069483460132605), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1700/4000 | cur=462.00 | best=429.00 | stall=79 | T=4.0381 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.968622305386469), ('ws_gap_bundle', 1.2041544759278966), ('rand_big', 0.24576000000000003), ('ws_idle_gap', 0.11519102043885371)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.5220694144848674), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1800/4000 | cur=638.00 | best=429.00 | stall=59 | T=4.4639 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.2681941375163057), ('ws_gap_bundle', 1.0983511722861616), ('chain', 0.7520000000000001), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.2693244252703153), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 1900/4000 | cur=481.00 | best=429.00 | stall=39 | T=4.9346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.1594703349669575), ('ws_gap_bundle', 1.316278083596477), ('chain', 0.48128000000000015), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.2880676321730018), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2000/4000 | cur=50172.00 | best=429.00 | stall=19 | T=5.4549 | post=6
+[ALNS-adapt] destroy top = [('ws_critical', 1.784242832560671), ('ws_gap_bundle', 1.0824179735017454), ('chain', 0.30801920000000016), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0967877743866397), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2100/4000 | cur=inf | best=429.00 | stall=119 | T=3.3044 | post=0
+[ALNS-adapt] destroy top = [('rand_small', 1.4720000000000002), ('ws_critical', 1.1419154128388296), ('ws_gap_bundle', 0.8298903601839742), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7691441756074494), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2200/4000 | cur=10158.00 | best=429.00 | stall=99 | T=3.6529 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.370825864216851), ('ws_gap_bundle', 0.9939869733748865), ('rand_small', 0.9420800000000003), ('chain', 0.4261646643200001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7662522723887677), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2300/4000 | cur=498.00 | best=429.00 | stall=79 | T=4.0381 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.441724157494389), ('ws_gap_bundle', 1.3561516629599275), ('rand_small', 0.6029312000000002), ('chain', 0.27274538516480007)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8435443114716685), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2400/4000 | cur=inf | best=429.00 | stall=59 | T=4.4639 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.1147034607964093), ('ws_gap_bundle', 0.9746037309610204), ('rand_small', 0.5677807299047621), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.701403053219419), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2500/4000 | cur=429.00 | best=429.00 | stall=39 | T=4.9346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 0.713410214909702), ('ws_gap_bundle', 0.6237463878150531), ('rand_small', 0.3633796671390478), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.4488979540604282), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2600/4000 | cur=455.00 | best=429.00 | stall=19 | T=5.4549 | post=6
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 0.953636190875431), ('ws_critical', 0.8840825375422093), ('rand_small', 0.43256298696899065), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6497436701905108), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2700/4000 | cur=520.00 | best=429.00 | stall=119 | T=3.3044 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.724669966884157), ('ws_gap_bundle', 0.9703271621602758), ('rand_small', 0.27684031166015405), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0373869693300901), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2800/4000 | cur=618.00 | best=429.00 | stall=99 | T=3.6529 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.8466459216630033), ('ws_gap_bundle', 0.962062015361524), ('rand_big', 0.19660800000000003), ('rand_small', 0.17717779946249862)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0819194971059518), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2900/4000 | cur=50022.00 | best=429.00 | stall=79 | T=4.0381 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.7163988444097769), ('ws_gap_bundle', 0.9800054041170898), ('rand_small', 0.33839379165599914), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0716284781478094), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3000/4000 | cur=573.00 | best=429.00 | stall=59 | T=4.4639 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.674330500696857), ('ws_gap_bundle', 1.235385276816756), ('rand_small', 0.3965720266598395), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1572707974431695), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3100/4000 | cur=10136.00 | best=429.00 | stall=39 | T=4.9346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.3615715204459886), ('ws_gap_bundle', 1.2159097350574606), ('rand_small', 0.5418060970622973), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.028947187914649), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3200/4000 | cur=30204.00 | best=429.00 | stall=19 | T=5.4549 | post=6
+[ALNS-adapt] destroy top = [('ws_critical', 1.677655773085433), ('ws_gap_bundle', 1.0342146191007424), ('rand_small', 0.3467559021198703), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1481262002653754), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3300/4000 | cur=510.00 | best=429.00 | stall=119 | T=3.3044 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.815979106539383), ('ws_gap_bundle', 0.9226665869937061), ('rand_small', 0.221923777356717), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1476007681698404), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3400/4000 | cur=50357.00 | best=429.00 | stall=99 | T=3.6529 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.7531648432881801), ('ws_gap_bundle', 1.2955066156759723), ('rand_big', 0.15728640000000005), ('rand_small', 0.14203121750829892)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.188064491628698), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3500/4000 | cur=30170.00 | best=429.00 | stall=79 | T=4.0381 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.403563961242897), ('ws_gap_bundle', 1.1291242340326224), ('rand_big', 0.15728640000000005), ('rand_small', 0.09089997920531132)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9859612746423669), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3600/4000 | cur=582.00 | best=429.00 | stall=59 | T=4.4639 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.129709506624026), ('ws_idle_gap', 1.3520000000000003), ('ws_gap_bundle', 1.1984289834650887), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3774152157711148), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3700/4000 | cur=465.00 | best=429.00 | stall=39 | T=4.9346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.1885213306161884), ('ws_gap_bundle', 1.7003278827509902), ('ws_idle_gap', 1.0919466666666668), ('rand_big', 0.15728640000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.4335457380935137), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3800/4000 | cur=50126.00 | best=429.00 | stall=19 | T=5.4549 | post=6
+[ALNS-adapt] destroy top = [('ws_critical', 2.3177360045355373), ('ws_gap_bundle', 1.6430816398324288), ('ws_idle_gap', 0.6988458666666668), ('robust_sensitive', 0.5120000000000001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.450269272379849), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3900/4000 | cur=530.00 | best=429.00 | stall=119 | T=3.3044 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.6310433505950517), ('ws_gap_bundle', 1.6115722494927545), ('robust_sensitive', 0.5276800000000001), ('ws_idle_gap', 0.4472613546666668)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3880907016700423), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 4000/4000 | cur=521.00 | best=429.00 | stall=99 | T=3.6529 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.4938677443808333), ('ws_gap_bundle', 1.437560085829209), ('robust_sensitive', 0.3377152000000001), ('ws_idle_gap', 0.28624726698666675)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.2027780490688273), ('repair_unordered', 0.05)]
+[ALNS-inner] best_obj after SA = 429.00
+[ALNS-inner] final_best_obj = 429.00
+[Lv0-Check] 基础结构检查通过（routes / shelf_seq / place 一致性良好）
+[ALNS] Done: best structure found for γ=10.
+[Profiler γ=10] evaluate calls=1002787 | total=1654.777s | avg=1.650ms
+[ALNS] Exact makespan: base=inf → best=429.00 (Δ=+inf)
+[WarmStart] WS-block fix re-eval (Exact): makespan=429.00
+[SIGMA] srcG=10 cell=23 order=[1, 2, 4, 11, 16, 19, 26, 37]
+[ALNS] saved bundle -> solution_exports\demo01_alns_bundle_gamma10.json
+
+[EXPORT-EVAL] evaluator diagnostics exported:
+  - diag_json: solution_exports\demo01_alns_bundle_srcG10_evalG10_diag.json
+  - pq_csv: solution_exports\demo01_alns_bundle_srcG10_evalG10_pq.csv
+  - timeline_csv: solution_exports\demo01_alns_bundle_srcG10_evalG10_timeline.csv
+  - robust_segments_csv: solution_exports\demo01_alns_bundle_srcG10_evalG10_robust_segments.csv
+  - v_arcs_csv: solution_exports\demo01_alns_bundle_srcG10_evalG10_v_arcs.csv
+  - end_shelf_final_csv: solution_exports\demo01_alns_bundle_srcG10_evalG10_end_shelf_final.csv
+
+[EXPORT-EVAL] ALNS diag exported for γ=10
+
+======================================================================
+[RUN] 开始 ALNS：γ = 15
+======================================================================
+[ALNS] Start: iters=4000, gamma=15
+[WARN] task_shelf_mapping 中有 6 条记录为 None/NaN/非法值，已忽略（这些任务将尝试从 shelf_seq 反推 chain）。
+[ALNS-inner] init_obj = 429.00 | init_infeas=(0, 0, 0)
+[ALNS-inner] iter 100/4000 | cur=inf | best=429.00 | stall=100 | T=2.5000 | post=0
+[ALNS-adapt] destroy top = [('chain', 0.748), ('ws_gap_bundle', 0.6746666666666667), ('rand_small', 0.6400000000000001), ('ws_critical', 0.6000000000000001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7031578947368422), ('repair_unordered', 0.6400000000000001)]
+[ALNS-inner] iter 200/4000 | cur=489.00 | best=429.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.1051200000000003), ('ws_idle_gap', 1.0886400000000003), ('ws_critical', 0.9690000000000002), ('shaw_related', 0.6086400000000002)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8715805601555189), ('repair_unordered', 0.40960000000000013)]
+[ALNS-inner] iter 300/4000 | cur=inf | best=429.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.2672768000000003), ('ws_idle_gap', 1.1767296000000003), ('ws_critical', 1.1001600000000005), ('rand_small', 0.6221440000000001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9352265244859269), ('repair_unordered', 0.2621440000000001)]
+[ALNS-inner] iter 400/4000 | cur=465.00 | best=429.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.607375127272728), ('ws_gap_bundle', 1.4910571520000004), ('ws_idle_gap', 0.8559640868571432), ('rand_big', 0.48)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9784843696103873), ('repair_unordered', 0.1677721600000001)]
+[ALNS-inner] iter 500/4000 | cur=494.00 | best=429.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('ws_critical', 1.7944343671688319), ('ws_gap_bundle', 1.2044583954618187), ('ws_idle_gap', 0.5478170155885718), ('rand_big', 0.48)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9865299965506479), ('repair_unordered', 0.13421772800000006)]
+[ALNS-inner] iter 600/4000 | cur=466.00 | best=429.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.3079379949880527), ('robust_sensitive', 2.0452672522922666), ('ws_gap_bundle', 1.5512455299583092), ('ws_idle_gap', 1.0487847081585042)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.3053791977924147), ('repair_unordered', 0.10737418240000006)]
+[ALNS-inner] iter 700/4000 | cur=546.00 | best=429.00 | stall=100 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 2.3437469834590208), ('ws_gap_bundle', 1.4899399963161755), ('robust_sensitive', 1.3987592767611683), ('ws_idle_gap', 0.6712222132214428)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.2554426865871455), ('repair_unordered', 0.10737418240000006)]
+[ALNS-inner] iter 800/4000 | cur=429.00 | best=429.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.4999980694137733), ('robust_sensitive', 0.9824786643998751), ('ws_gap_bundle', 0.9535615976423524), ('ws_idle_gap', 0.4295822164617234)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8418833194157733), ('repair_unordered', 0.10737418240000006)]
+[ALNS-inner] iter 900/4000 | cur=436.00 | best=429.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.2830756875017382), ('ws_gap_bundle', 1.0302794224911056), ('ws_idle_gap', 0.8749326185355031), ('robust_sensitive', 0.6287863452159201)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.742805324426095), ('repair_unordered', 0.10737418240000006)]
+[ALNS-inner] iter 1000/4000 | cur=inf | best=429.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.6022359732514506), ('ws_critical', 1.3294037341187597), ('ws_idle_gap', 0.840865966771813), ('robust_sensitive', 0.6043056138793654)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8709056117143336), ('repair_unordered', 0.08589934592000005)]
+[ALNS-inner] iter 1100/4000 | cur=431.00 | best=429.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('chain', 1.84), ('ws_gap_bundle', 1.2562002536501593), ('ws_idle_gap', 0.9581542187339604), ('ws_critical', 0.8508183898360063)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.741542856803296), ('repair_unordered', 0.06871947673600004)]
+[ALNS-inner] iter 1200/4000 | cur=581.00 | best=429.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('ws_gap_bundle', 1.5113365833887336), ('ws_critical', 1.20023805520933), ('chain', 1.1976000000000002), ('ws_idle_gap', 0.6132186999897348)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7892150879285776), ('repair_unordered', 0.20398046511104007)]
+[ALNS-inner] iter 1300/4000 | cur=475.00 | best=429.00 | stall=100 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.9572432644248803), ('ws_gap_bundle', 1.1435191496325259), ('ws_idle_gap', 0.8724599679934303), ('chain', 0.7664640000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8448802649699418), ('repair_unordered', 0.13054749767106566)]
+[ALNS-inner] iter 1400/4000 | cur=546.00 | best=429.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.845969022565257), ('ws_gap_bundle', 1.228995112907674), ('ws_idle_gap', 0.5583743795157954), ('chain', 0.49053696000000024)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8657029614174974), ('repair_unordered', 0.10443799813685253)]
+[ALNS-inner] iter 1500/4000 | cur=inf | best=429.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.5270201744417644), ('ws_gap_bundle', 0.841102326806366), ('shaw_related', 0.6400000000000001), ('rand_big', 0.384)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7768498953071984), ('repair_unordered', 0.08355039850948204)]
+[ALNS-inner] iter 1600/4000 | cur=10136.00 | best=429.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 0.9772929116427292), ('ws_gap_bundle', 0.9583054891560744), ('shaw_related', 0.40960000000000013), ('rand_big', 0.384)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.581183932996607), ('repair_unordered', 0.08355039850948204)]
+[ALNS-inner] iter 1700/4000 | cur=10101.00 | best=429.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('ws_critical', 1.44880079678468), ('ws_gap_bundle', 1.3083155130598876), ('rand_big', 0.30720000000000003), ('shaw_related', 0.2621440000000001)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9286107783423183), ('repair_unordered', 0.06684031880758563)]
+[ALNS-inner] iter 1800/4000 | cur=741.00 | best=429.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.7812325099421957), ('ws_gap_bundle', 1.1047504997868993), ('chain', 0.5322984453390337), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0716170205880635), ('repair_unordered', 0.053472255046068506)]
+[ALNS-inner] iter 1900/4000 | cur=547.00 | best=429.00 | stall=100 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.7771316635058625), ('ws_gap_bundle', 1.2546593674826634), ('chain', 0.3406710050169816), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0914348931763607), ('repair_unordered', 0.053472255046068506)]
+[ALNS-inner] iter 2000/4000 | cur=inf | best=429.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.532658382290811), ('ws_gap_bundle', 0.9096486618555713), ('rand_small', 0.392), ('rand_big', 0.30720000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9097183316328709), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2100/4000 | cur=inf | best=429.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.0899922737570285), ('ws_gap_bundle', 0.5821751435875656), ('robust_sensitive', 0.396373401189647), ('rand_small', 0.25088000000000005)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6434442220409557), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2200/4000 | cur=467.00 | best=429.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.1975950552044983), ('ws_gap_bundle', 0.8392587585627087), ('robust_sensitive', 0.37367897676137407), ('rand_big', 0.24576000000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.6671234510423819), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2300/4000 | cur=30180.00 | best=429.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('ws_critical', 1.3987366973998445), ('ws_gap_bundle', 1.2871256054801337), ('robust_sensitive', 0.35915454512727946), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8966732943814103), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2400/4000 | cur=inf | best=429.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('shaw_related', 1.84), ('ws_critical', 1.3651914863359007), ('ws_gap_bundle', 1.0066175303644285), ('robust_sensitive', 0.5258589088814589)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8938709084041028), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2500/4000 | cur=70447.00 | best=429.00 | stall=100 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.77205588458831), ('shaw_related', 1.1776000000000002), ('ws_gap_bundle', 0.9687806739786888), ('robust_sensitive', 0.4032163683508004)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9048324834194421), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2600/4000 | cur=210403.00 | best=429.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.3712007863794335), ('shaw_related', 0.8436640000000003), ('ws_gap_bundle', 0.620019631346361), ('robust_sensitive', 0.4080584757445123)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.699092789388443), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2700/4000 | cur=489.00 | best=429.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.6743800974857364), ('ws_gap_bundle', 1.3168125640616712), ('shaw_related', 0.5399449600000003), ('robust_sensitive', 0.26115742447648793)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9642193852086036), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2800/4000 | cur=429.00 | best=429.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.5901746909623), ('ws_gap_bundle', 0.9927600409994697), ('shaw_related', 0.3455647744000002), ('robust_sensitive', 0.20892593958119035)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9411004065335065), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 2900/4000 | cur=inf | best=429.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('ws_critical', 1.5900194945235644), ('ws_gap_bundle', 0.9313664262396606), ('shaw_related', 0.22116145561600017), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.0032042601814444), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3000/4000 | cur=467.00 | best=429.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.3394306583132634), ('ws_gap_bundle', 0.7706199673388374), ('rand_big', 0.19660800000000003), ('shaw_related', 0.14154333159424012)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8316507265161245), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3100/4000 | cur=504.00 | best=429.00 | stall=100 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_idle_gap', 1.84), ('ws_critical', 1.3604856213204886), ('ws_gap_bundle', 0.7251967790968561), ('rand_big', 0.19660800000000003)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9306564649703197), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3200/4000 | cur=inf | best=429.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_idle_gap', 1.1776000000000002), ('ws_critical', 1.088892615826931), ('chain', 0.6920000000000002), ('ws_gap_bundle', 0.6386713931674425)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8716201375810048), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3300/4000 | cur=inf | best=429.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 0.760891274129236), ('ws_idle_gap', 0.7536640000000002), ('shaw_related', 0.5051047351174406), ('ws_gap_bundle', 0.46874969162716323)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.615436888051843), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3400/4000 | cur=554.00 | best=429.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_idle_gap', 1.6877995054545458), ('ws_gap_bundle', 1.5557140883556704), ('ws_critical', 0.881970415442711), ('shaw_related', 0.3766003638084954)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8245938940674653), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3500/4000 | cur=10101.00 | best=429.00 | stall=20 | T=5.4277 | post=5
+[ALNS-adapt] destroy top = [('chain', 1.3814036480000003), ('ws_gap_bundle', 1.3699427308333436), ('ws_idle_gap', 1.2935250168242427), ('ws_critical', 0.9229226043448735)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.8229400922031779), ('repair_unordered', 0.05)]
+[ALNS-inner] iter 3600/4000 | cur=579.00 | best=429.00 | stall=120 | T=3.2879 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.890670466780719), ('ws_gap_bundle', 1.29676334773334), ('ws_idle_gap', 1.1878560107675153), ('chain', 1.0049678999373917)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9783143120712585), ('repair_unordered', 0.6400000000000001)]
+[ALNS-inner] iter 3700/4000 | cur=509.00 | best=429.00 | stall=100 | T=3.6346 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.9600290987396605), ('ws_gap_bundle', 1.2139285425493378), ('ws_idle_gap', 0.94022784689121), ('chain', 0.7871794559599308)]
+[ALNS-adapt] repair  top = [('repair_ordered', 1.1669483071275144), ('repair_unordered', 0.5696000000000002)]
+[ALNS-inner] iter 3800/4000 | cur=694.00 | best=429.00 | stall=80 | T=4.0179 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.4464186231933829), ('ws_gap_bundle', 1.276914267231576), ('ws_idle_gap', 0.7217458220103745), ('chain', 0.6347039427234468)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.969617391789112), ('repair_unordered', 0.7245440000000003)]
+[ALNS-inner] iter 3900/4000 | cur=503.00 | best=429.00 | stall=60 | T=4.4416 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.585707918843765), ('ws_gap_bundle', 1.1452251310282087), ('ws_idle_gap', 0.6676316118009255), ('chain', 0.40621052334300595)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.9889272237682876), ('repair_unordered', 0.4637081600000002)]
+[ALNS-inner] iter 4000/4000 | cur=464.00 | best=429.00 | stall=40 | T=4.9099 | post=0
+[ALNS-adapt] destroy top = [('ws_critical', 1.2148530680600096), ('ws_gap_bundle', 0.9954440838580536), ('ws_idle_gap', 0.4272842315525924), ('chain', 0.25997473493952383)]
+[ALNS-adapt] repair  top = [('repair_ordered', 0.7864017953047274), ('repair_unordered', 0.29677322240000015)]
+[ALNS-inner] best_obj after SA = 429.00
+[ALNS-inner] final_best_obj = 429.00
+[Lv0-Check] 基础结构检查通过（routes / shelf_seq / place 一致性良好）
+[ALNS] Done: best structure found for γ=15.
+[Profiler γ=15] evaluate calls=990014 | total=1714.600s | avg=1.732ms
+[ALNS] Exact makespan: base=inf → best=429.00 (Δ=+inf)
+[WarmStart] WS-block fix re-eval (Exact): makespan=429.00
+[SIGMA] srcG=15 cell=23 order=[1, 2, 4, 11, 16, 19, 26, 37]
+[ALNS] saved bundle -> solution_exports\demo01_alns_bundle_gamma15.json
+
+[EXPORT-EVAL] evaluator diagnostics exported:
+  - diag_json: solution_exports\demo01_alns_bundle_srcG15_evalG15_diag.json
+  - pq_csv: solution_exports\demo01_alns_bundle_srcG15_evalG15_pq.csv
+  - timeline_csv: solution_exports\demo01_alns_bundle_srcG15_evalG15_timeline.csv
+  - robust_segments_csv: solution_exports\demo01_alns_bundle_srcG15_evalG15_robust_segments.csv
+  - v_arcs_csv: solution_exports\demo01_alns_bundle_srcG15_evalG15_v_arcs.csv
+  - end_shelf_final_csv: solution_exports\demo01_alns_bundle_srcG15_evalG15_end_shelf_final.csv
+
+[EXPORT-EVAL] ALNS diag exported for γ=15
+
+======================================================================
+[CrossGamma] start cross-gamma evaluation suite (ALNS only)
+======================================================================
+
+[CrossGamma] makespan matrix: alns
+eval_gamma       0      5      10     15
+source_gamma
+0             309.0  431.0  441.0  441.0
+5             311.0  430.0  444.0  444.0
+10            302.0  424.0  429.0  429.0
+15            302.0  424.0  429.0  429.0
+[CrossGamma] exported:
+  - solution_exports\demo01_crossGamma_alns_suite.csv
+  - solution_exports\demo01_crossGamma_alns_matrix.csv
+
+
+进程已结束，退出代码为 0

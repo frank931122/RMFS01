@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+import os, math
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import matplotlib.animation as animation
+
+# 中文 & 负号
+matplotlib.rcParams['font.sans-serif'] = ['SimHei']
+matplotlib.rcParams['axes.unicode_minus'] = False
+
+# ----------------------------------------------------------------------
+# 1. 读取 / 生成 timeline.csv 以及逐秒轨迹 CSV
+# ----------------------------------------------------------------------
+FOLDER, PREFIX = "solution_exports", "demo01"
+TIMELINE_CSV      = f"{FOLDER}/{PREFIX}_timeline.csv"
+AGV_POS_CSV       = f"{FOLDER}/{PREFIX}_agv_pos.csv"
+SHELF_POS_CSV     = f"{FOLDER}/{PREFIX}_shelf_pos.csv"
+
+# 若还没有，就自动跑一次仿真（会生成上述 3 个文件）
+if not (os.path.exists(TIMELINE_CSV) and
+        os.path.exists(AGV_POS_CSV) and
+        os.path.exists(SHELF_POS_CSV)):
+    import run_phys_sim  # 运行后会在 solution_exports 下生成 CSV
+# 读取
+df_timeline = pd.read_csv(TIMELINE_CSV)
+df_agv_pos  = pd.read_csv(AGV_POS_CSV).set_index("time")
+df_shelf_pos = pd.read_csv(SHELF_POS_CSV).set_index("time")
+
+# 时间列统一 float
+time_cols = ["move1_s","move1_e","pick_s","pick_e",
+             "move2_s","move2_e","ws_s","ws_e",
+             "move3_s","move3_e","drop_s","drop_e"]
+for c in time_cols:
+    df_timeline[c] = df_timeline[c].astype(float)
+
+print("\n=== 仿真详细时间表 ===")
+print(df_timeline[["Task","AGV","Shelf","WS"] + time_cols].to_string(index=False))
+
+# ----------------------------------------------------------------------
+# 2. 地图基础数据
+# ----------------------------------------------------------------------
+from map_generator import create_map
+shelf_data = {1:23,2:24,3:25,4:41,5:42,6:43}
+agv_data   = {1:14,2:15,3:16}
+map_obj = create_map(shelf_data, agv_data)
+
+storage_point_ids = [14,15,16,23,24,25,41,42,43,50,51,52]
+S = {sid: coord for sid, coord in
+     zip(storage_point_ids, map_obj.extract_storage_points())}
+R = map_obj.extract_AGVs()
+K = {i+1: coord for i,coord in enumerate(map_obj.extract_workstations())}
+
+W, H = map_obj.width, map_obj.height
+def idx2coord(idx:int):
+    return divmod(idx-1, W)
+
+# ----------------------------------------------------------------------
+# 3. 等待区（仅供动画显示：真正的仿真轨迹里没有分流到等待区）
+# ----------------------------------------------------------------------
+waiting_cells = {
+    1: [20, 29],   # WS1(地图 cell 11)
+    2: [47, 56],   # WS2(地图 cell 38)
+}
+
+# ----------------------------------------------------------------------
+# 4. 动画准备
+# ----------------------------------------------------------------------
+times = list(range(int(df_agv_pos.index.max())+1))
+
+fig, ax = plt.subplots(figsize=(6,5))
+ax.set_title("RMFS 动画（真实轨迹 + 等待区可视化）")
+ax.set_xlim(0,W); ax.set_ylim(H,0); ax.set_aspect('equal')
+ax.set_xticks(range(W+1)); ax.set_yticks(range(H+1))
+ax.grid(True, linestyle='--', color='gray', linewidth=0.5)
+
+# 背景：储位
+for sp,(r,c) in S.items():
+    ax.add_patch(patches.Rectangle((c,r),1,1, fill=False, edgecolor='lightgray'))
+    ax.text(c+0.5,r+0.5,str(sp),ha='center',va='center',fontsize=6,color='gray')
+# 背景：工作站
+for ws,(r,c) in K.items():
+    ax.add_patch(patches.Rectangle((c,r),1,1,facecolor='skyblue',edgecolor='k',alpha=0.6))
+    ax.text(c+0.5,r+0.5,f"WS{ws}",ha='center',va='center',fontsize=8,color='white')
+# 背景：等待区
+for ws,cells in waiting_cells.items():
+    for idx in cells:
+        r,c = idx2coord(idx)
+        ax.add_patch(patches.Rectangle((c,r),1,1,
+                                       facecolor='lightyellow',
+                                       edgecolor='orange',alpha=0.4))
+        ax.text(c+0.5,r+0.5,"Q",ha='center',va='center',fontsize=6,color='orange')
+
+# artists
+agv_ids    = sorted(agv_data)
+shelf_ids  = sorted(shelf_data)
+agv_cmap   = plt.get_cmap('tab10', len(agv_ids))
+shelf_cmap = plt.get_cmap('Set3', len(shelf_ids))
+
+agv_artists = {}
+for i, agv in enumerate(agv_ids):
+    r,c = R[agv]
+    scat, = ax.plot([c+0.5],[r+0.5],'o',ms=12,color=agv_cmap(i),label=f"AGV{agv}")
+    agv_artists[agv] = scat
+
+shelf_artists = {}
+for i, sh in enumerate(shelf_ids):
+    sp = shelf_data[sh]; r,c = S[sp]
+    rect = patches.Rectangle((c,r),1,1,fc=shelf_cmap(i),ec='k')
+    ax.add_patch(rect); shelf_artists[sh] = rect
+
+time_text = ax.text(0.02,0.96,"",transform=ax.transAxes)
+
+# ----------------------------------------------------------------------
+# 5. 预处理：到达时间(用于等待区排序)
+# ----------------------------------------------------------------------
+# 直接用 timeline 中 move2_e 作为“到达 WS”时间
+# 用一个列表方便查询
+arrival_records = []   # [(ws_id, agv, move2_e, move3_s), ...]
+for _, row in df_timeline.iterrows():
+    arrival_records.append((
+        int(row["WS"]), int(row["AGV"]),
+        float(row["move2_e"]), float(row["move3_s"])
+    ))
+arrival_df = pd.DataFrame(arrival_records,
+                          columns=["WS","AGV","arrive","leave"])
+
+# ----------------------------------------------------------------------
+# 6. 帧函数
+# ----------------------------------------------------------------------
+def animate_frame(t:int):
+    # 1) 找出每个 WS 当前在“到站到返程”区间的 AGV
+    wait_disp = {}  # agv -> waiting cell index
+    for ws_id in arrival_df["WS"].unique():
+        sub = arrival_df[(arrival_df["WS"]==ws_id) &
+                         (arrival_df["arrive"]<=t) &
+                         (t < arrival_df["leave"])]
+        if sub.empty:  # 该 WS 当前没有车
+            continue
+        # 按到达时间排序
+        sub = sub.sort_values("arrive")
+        agv_list = list(sub["AGV"].values)
+        # 第一个占用 workstation，其他排队
+        for rank, agv in enumerate(agv_list[1:]):
+            cells = waiting_cells.get(ws_id, [])
+            if not cells:
+                continue
+            # rank 0 -> 第一等待格
+            cell_idx = cells[min(rank, len(cells)-1)]
+            wait_disp[agv] = cell_idx
+
+    # 2) 设置 AGV 可视化位置
+    for agv, scat in agv_artists.items():
+        # 基础：真实仿真轨迹位置
+        if str(agv) not in df_agv_pos.columns:
+            continue
+        base_idx = int(df_agv_pos.loc[t, str(agv)])
+        if agv in wait_disp:
+            # 显示排队位置
+            rr,cc = idx2coord(wait_disp[agv])
+        else:
+            rr,cc = idx2coord(base_idx)
+        scat.set_data([cc+0.5],[rr+0.5])
+
+    # 3) 设置货架位置
+    for sh, rect in shelf_artists.items():
+        # 判定此时是否被某个 AGV 搬运：timeline 条件 move1_e <= t < drop_s
+        carrying = df_timeline[(df_timeline["Shelf"]==sh) &
+                               (df_timeline["move1_e"]<=t) &
+                               (t < df_timeline["drop_s"])]
+        if not carrying.empty:
+            agv0 = int(carrying.iloc[0]["AGV"])
+            # 若该 AGV 在等待区被偏移，货架也跟随偏移；否则用真实轨迹
+            if agv0 in wait_disp:
+                rr,cc = idx2coord(wait_disp[agv0])
+            else:
+                idx = int(df_agv_pos.loc[t, str(agv0)])
+                rr,cc = idx2coord(idx)
+            rect.set_xy((cc,rr))
+        else:
+            # 静止：回到 home
+            home_idx = shelf_data[sh]
+            rr,cc = idx2coord(home_idx)
+            rect.set_xy((cc,rr))
+
+    time_text.set_text(f"t = {t}s")
+    return list(agv_artists.values()) + list(shelf_artists.values()) + [time_text]
+
+# ----------------------------------------------------------------------
+# 7. 启动动画
+# ----------------------------------------------------------------------
+ani = animation.FuncAnimation(fig, animate_frame,
+                              frames=times,
+                              interval=300,
+                              blit=True,
+                              repeat=False)
+plt.legend(loc="upper right")
+plt.tight_layout()
+plt.show()
