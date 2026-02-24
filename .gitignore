@@ -25,8 +25,7 @@ Thumbs.db
 *.log
 
 # Data/results
-*.csv
-*.json
+
 *.pkl
 *.pickle
 *.npz
