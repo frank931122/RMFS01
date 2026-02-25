@@ -47,3 +47,10 @@ Thumbs.db
 gurobi.lic
 gurobi.log
 pythonProject5/solution_exports/
+# Generated outputs (do not commit every run)
+pythonProject5/solution_samples/
+pythonProject5/solution_exports/
+pythonProject5/timeline.csv
+bench_quick_*_runs.csv
+# keep baseline summaries
+!bench_baseline_*.json
