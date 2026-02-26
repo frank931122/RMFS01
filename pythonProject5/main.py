@@ -10,7 +10,7 @@ import math
 import time
 from typing import Dict, List, Optional, Set
 from heuristic_init import build_initial_solution_basic
-from pythonProject5.solution_exports.solution_structures import InitialSolution
+from solution_exports.solution_structures import InitialSolution
 from warmstart_checks import check_v_consistency
 from map_generator import load_map_csv, create_map_from_components
 from movement_manager import MovementManager
@@ -20,7 +20,10 @@ from utils import distance
 from evaluator import RobustEvaluator
 from alns_min import alns_minimize
 from export_eval_diag import export_evaluator_diagnostics
-
+import sys
+import subprocess
+import re
+from pathlib import Path
 
 class EvalProfiler:
     """
@@ -1209,7 +1212,337 @@ def run_cross_gamma_check(
     print("\n[CrossGamma] makespan matrix:", tag)
     print(pivot)
     print(f"[CrossGamma] exported:\n  - {suite_path}\n  - {matrix_path}\n")
+# ============================================================
+# Quick benchmark (integrated, subprocess-based)
+# Output files are generated in project root (same level as main.py).
+# ============================================================
 
+_RE_EXACT = re.compile(
+    r"\[ALNS\]\s*Exact makespan:\s*base=([^\s]+)\s*(?:→|->)\s*best=([^\s]+)",
+    re.IGNORECASE
+)
+_RE_WARM = re.compile(
+    r"\[WarmStart\]\s*WS-block fix re-eval\s*\(Exact\):\s*makespan=([^\s]+)",
+    re.IGNORECASE
+)
+_RE_PROF = re.compile(
+    r"\[Profiler.*?\]\s*evaluate calls=(\d+)\s*\|\s*total=([0-9\.]+)s\s*\|\s*avg=([0-9\.]+)ms",
+    re.IGNORECASE
+)
+
+def _bench_decode_best_effort(b: bytes) -> str:
+    if b is None:
+        return ""
+    # try utf-8 / cp936, pick one with fewer replacement chars
+    cands = []
+    for enc in ("utf-8", "cp936", "gbk"):
+        try:
+            s = b.decode(enc, errors="replace")
+            cands.append((s.count("\ufffd"), s))
+        except Exception:
+            pass
+    if cands:
+        cands.sort(key=lambda x: x[0])
+        return cands[0][1]
+    return b.decode("utf-8", errors="replace")
+
+def _bench_as_float(tok: str) -> float:
+    if tok is None:
+        return float("nan")
+    t = str(tok).strip().lower()
+    if t in ("inf", "+inf", "infinity", "+infinity"):
+        return float("inf")
+    if t in ("-inf", "-infinity"):
+        return float("-inf")
+    if t in ("nan", "+nan", "-nan"):
+        return float("nan")
+    try:
+        return float(tok)
+    except Exception:
+        return float("nan")
+
+def _bench_is_finite(x: float) -> bool:
+    try:
+        return math.isfinite(float(x))
+    except Exception:
+        return False
+
+def _parse_int_list(s: str, default=None) -> list[int]:
+    if default is None:
+        default = [0]
+    if s is None:
+        return list(default)
+    s = str(s).strip()
+    if not s:
+        return list(default)
+    out = []
+    for tok in s.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        out.append(int(tok))
+    return out if out else list(default)
+
+def _extract_metrics_from_stdout(stdout_text: str) -> dict:
+    # take "last match" (because your program may print multiple times)
+    exact_best = float("inf")
+    warm_ms = float("nan")
+    prof_calls = -1
+    prof_total = float("nan")
+    prof_avg = float("nan")
+
+    mlist = list(_RE_EXACT.finditer(stdout_text))
+    if mlist:
+        m = mlist[-1]
+        exact_best = _bench_as_float(m.group(2))
+
+    wlist = list(_RE_WARM.finditer(stdout_text))
+    if wlist:
+        warm_ms = _bench_as_float(wlist[-1].group(1))
+
+    plist = list(_RE_PROF.finditer(stdout_text))
+    if plist:
+        m = plist[-1]
+        try:
+            prof_calls = int(m.group(1))
+        except Exception:
+            prof_calls = -1
+        prof_total = _bench_as_float(m.group(2))
+        prof_avg = _bench_as_float(m.group(3))
+
+    # final makespan: prefer warmstart re-eval if present
+    final_ms = warm_ms if _bench_is_finite(warm_ms) else exact_best
+
+    return {
+        "exact_best": float(exact_best),
+        "warm_ms": float(warm_ms),
+        "final_ms": float(final_ms),
+        "prof_calls": int(prof_calls),
+        "prof_total_sec": float(prof_total),
+        "prof_avg_ms": float(prof_avg),
+        "feasible": bool(_bench_is_finite(final_ms)),
+    }
+
+def _bench_bundle_path(root: Path, prefix: str, gamma: int) -> Path:
+    return root / "solution_exports" / f"{prefix}_alns_bundle_gamma{int(gamma)}.json"
+
+def _bench_try_read_bundle_cmax(bundle_path: Path) -> float | None:
+    if not bundle_path.exists():
+        return None
+    try:
+        with open(bundle_path, "r", encoding="utf-8") as f:
+            b = json.load(f)
+        if isinstance(b, dict) and ("cmax" in b):
+            return float(b["cmax"])
+    except Exception:
+        return None
+    return None
+
+def run_quick_benchmark_subprocess(args) -> int:
+    """
+    Quick benchmark mode:
+      - runs main.py as subprocess for (gamma x seed)
+      - prefers reading makespan from exported bundle JSON (cmax) to avoid stdout parsing fragility
+      - still parses profiler metrics from stdout (optional)
+      - writes CSV + JSON summary in project root (same dir as main.py)
+      - prints progress per run
+      - optional PASS/FAIL vs baseline summary json
+    """
+    root = Path(__file__).resolve().parent
+    main_py = Path(__file__).resolve()
+
+    seeds = _parse_int_list(getattr(args, "bench_seeds", "0,1,2"), default=[0])
+    iters = int(getattr(args, "bench_iters", 200) or 200)
+    if iters <= 0:
+        iters = 200
+
+    gammas_str = (getattr(args, "bench_gammas", "") or "").strip()
+    if gammas_str:
+        gamma_list = parse_gamma_list(gammas_str)
+    else:
+        gamma_list = parse_gamma_list(getattr(args, "gammas", "0"))
+
+    rows = []
+    t_global0 = time.perf_counter()
+
+    for g in gamma_list:
+        for sd in seeds:
+            g = int(g)
+            sd = int(sd)
+
+            # 关键：防止读到“上一次 run 的旧 bundle”
+            bundle_path = _bench_bundle_path(root, str(args.prefix), g)
+            try:
+                if bundle_path.exists():
+                    bundle_path.unlink()
+            except Exception:
+                pass
+
+            print(f"[BENCH] running gamma={g} seed={sd} iters={iters} ...")
+
+            cmd = [
+                sys.executable, str(main_py),
+                "--prefix", str(args.prefix),
+                "--gammas", str(g),
+                "--alns-iters", str(iters),
+                "--seed", str(sd),
+            ]
+
+            t0 = time.perf_counter()
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=str(root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=int(getattr(args, "bench_timeout", 1800) or 1800),
+                    env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+                )
+                wall = time.perf_counter() - t0
+                out_text = _bench_decode_best_effort(proc.stdout or b"")
+                exit_code = int(proc.returncode)
+            except subprocess.TimeoutExpired as e:
+                wall = time.perf_counter() - t0
+                out_text = _bench_decode_best_effort((e.stdout or b"")) + "\n[BENCH] TIMEOUT"
+                exit_code = 124
+            except Exception as e:
+                wall = time.perf_counter() - t0
+                out_text = f"[BENCH] EXCEPTION: {type(e).__name__}: {e}"
+                exit_code = 125
+
+            # 先从 stdout 抓 profiler / warm/exact（可选）
+            met = _extract_metrics_from_stdout(out_text)
+            final_src = "stdout"
+
+            # ✅ 最稳：优先从 bundle JSON 读 cmax
+            cmax_bundle = _bench_try_read_bundle_cmax(bundle_path)
+            if cmax_bundle is not None:
+                met["final_ms"] = float(cmax_bundle)
+                met["feasible"] = bool(_bench_is_finite(met["final_ms"]))
+                final_src = "bundle"
+
+            # 子进程失败：强制判失败
+            if exit_code != 0:
+                met["feasible"] = False
+                met["final_ms"] = float("inf")
+                final_src = f"exit{exit_code}"
+
+            print(f"[BENCH] done  gamma={g} seed={sd} exit={exit_code} final_ms={met['final_ms']} src={final_src} wall={wall:.2f}s")
+
+            # 如果失败，顺手落一个日志，方便你回看是哪条约束爆掉了
+            if (not _bench_is_finite(met["final_ms"])) or exit_code != 0:
+                try:
+                    log_path = root / f"bench_quick_{args.prefix}_g{g}_s{sd}.log"
+                    with open(log_path, "w", encoding="utf-8") as f:
+                        f.write(out_text)
+                    print(f"[BENCH] wrote log: {log_path}")
+                except Exception:
+                    pass
+
+            rows.append({
+                "prefix": str(args.prefix),
+                "gamma": int(g),
+                "seed": int(sd),
+                "iters": int(iters),
+                "exit_code": int(exit_code),
+                "wall_time_sec": float(wall),
+                "final_ms": float(met["final_ms"]),
+                "exact_best": float(met.get("exact_best", float("inf"))),
+                "warm_ms": float(met.get("warm_ms", float("nan"))),
+                "feasible": bool(met["feasible"]),
+                "prof_calls": int(met.get("prof_calls", -1)),
+                "prof_total_sec": float(met.get("prof_total_sec", float("nan"))),
+                "prof_avg_ms": float(met.get("prof_avg_ms", float("nan"))),
+                "final_ms_src": str(final_src),
+            })
+
+    total_wall = time.perf_counter() - t_global0
+    df = pd.DataFrame(rows)
+
+    # ----- write outputs in root -----
+    csv_path = root / f"bench_quick_{args.prefix}_runs.csv"
+    summary_path = root / f"bench_quick_{args.prefix}_summary.json"
+    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+
+    # ----- compute summary + score -----
+    def _ms_to_score(v: float) -> float:
+        return float(v) if _bench_is_finite(v) else 1e30
+
+    df["ms_score"] = df["final_ms"].apply(_ms_to_score)
+
+    per_gamma = []
+    overall_score = 0.0
+
+    for g in sorted(df["gamma"].unique().tolist()):
+        dfg = df[df["gamma"] == g].copy()
+        feas_rate = float(dfg["feasible"].mean()) if len(dfg) else 0.0
+        mean_wall = float(dfg["wall_time_sec"].mean()) if len(dfg) else 0.0
+
+        p50 = float(dfg["ms_score"].quantile(0.50)) if len(dfg) else 1e30
+        p90 = float(dfg["ms_score"].quantile(0.90)) if len(dfg) else 1e30
+        mean_ms = float(dfg["ms_score"].mean()) if len(dfg) else 1e30
+
+        score_g = float(p90 + 0.05 * mean_wall + 1e6 * (1.0 - feas_rate))
+        overall_score += score_g
+
+        per_gamma.append({
+            "gamma": int(g),
+            "n_runs": int(len(dfg)),
+            "feasible_rate": float(feas_rate),
+            "makespan_mean": float(mean_ms),
+            "makespan_p50": float(p50),
+            "makespan_p90": float(p90),
+            "wall_time_mean_sec": float(mean_wall),
+            "score_gamma": float(score_g),
+        })
+
+    summary = {
+        "prefix": str(args.prefix),
+        "bench_iters": int(iters),
+        "bench_seeds": [int(x) for x in seeds],
+        "bench_gammas": [int(x) for x in gamma_list],
+        "total_wall_time_sec": float(total_wall),
+        "overall": {
+            "score": float(overall_score),
+            "n_total_runs": int(len(df)),
+            "overall_feasible_rate": float(df["feasible"].mean()) if len(df) else 0.0,
+        },
+        "by_gamma": per_gamma,
+    }
+
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    print(f"[BENCH] wrote: {csv_path}")
+    print(f"[BENCH] wrote: {summary_path}")
+    print(f"[BENCH] SCORE={overall_score:.6g}")
+
+    # ----- optional compare baseline -----
+    baseline = (getattr(args, "bench_compare", "") or "").strip()
+    tol = float(getattr(args, "bench_tol", 0.0) or 0.0)
+
+    if baseline:
+        try:
+            baseline_path = Path(baseline)
+            if not baseline_path.is_absolute():
+                baseline_path = root / baseline_path
+
+            with open(baseline_path, "r", encoding="utf-8") as f:
+                base = json.load(f)
+
+            base_score = base.get("overall", {}).get("score", None)
+            if base_score is None:
+                base_score = base.get("score", None)
+            base_score = float(base_score)
+
+            ok = (overall_score <= base_score * (1.0 + tol))
+            print(f"[BENCH] baseline_score={base_score:.6g} tol={tol:.3g} => {'PASS' if ok else 'FAIL'}")
+            return 0 if ok else 2
+        except Exception as e:
+            print(f"[BENCH] baseline compare failed: {type(e).__name__}: {e}")
+            return 0
+
+    return 0
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prefix", default="demo01")
@@ -1232,9 +1565,24 @@ def main():
         action="store_true",
         help="打印更详细的 ALNS 解与 timeline（默认只打印摘要 + 进度）",
     )
-
+    # ===== Quick benchmark (very small data, for automation) =====
+    ap.add_argument(
+        "--quick-bench",
+        action="store_true",
+        help="快速基准测试：subprocess 反复运行 main.py，抓 makespan/Profiler，输出到项目根目录"
+    )
+    ap.add_argument("--bench-iters", type=int, default=200, help="quick-bench 用的 ALNS 迭代次数")
+    ap.add_argument("--bench-seeds", default="0,1,2", help="quick-bench 用的 seeds，逗号分隔，例如 0,1,2")
+    ap.add_argument("--bench-gammas", default="", help="quick-bench 覆盖用的 gammas（可空，空则沿用 --gammas）")
+    ap.add_argument("--bench-timeout", type=int, default=1800, help="每次子进程运行的超时秒数")
+    ap.add_argument("--bench-compare", default="", help="可选：baseline summary.json 路径，用于 PASS/FAIL")
+    ap.add_argument("--bench-tol", type=float, default=0.0, help="baseline 容忍比例，比如 0.01 表示允许差 1%%")
     args = ap.parse_args()
 
+    # --- quick benchmark mode: run and exit ---
+    if args.quick_bench:
+        code = run_quick_benchmark_subprocess(args)
+        raise SystemExit(code)
     # ===== init-cell lock config (only affects evaluator.py) =====
     INIT_LOCK_ITERS_ALIGN = 3
     INIT_LOCK_ITERS_CROSS = 2

@@ -136,60 +136,28 @@ def _dc_place(place: Dict[int, int]) -> Dict[int, int]:
 def _dc_shelf_seq(shelf_seq: Dict[int, List[int]]) -> Dict[int, List[int]]:
     return {int(c): [int(j) for j in seq] for c, seq in shelf_seq.items()}
 from typing import Any
-def patch_evaluator_evaluate_safe(
-    evaluator: RobustEvaluator,
-    *,
-    fail_cost: float = float("inf"),
-) -> None:
-    """
-    把 evaluator.evaluate 包成“永不抛异常”的安全版本。
-    好处：你不用逐个改 destroy/local/intensify 里的 evaluator.evaluate。
-    """
-    # 只 patch 一次：保存原始 evaluate
-    if getattr(evaluator, "_evaluate_orig", None) is None:
-        evaluator._evaluate_orig = evaluator.evaluate
 
-    orig = evaluator._evaluate_orig
-
-    def _eval_safe(routes, shelf_seq, place):
-        try:
-            obj, det = orig(routes, shelf_seq, place)
-            obj_raw = float(obj)
-            det_d = dict(det) if isinstance(det, dict) else {}
-            return obj_raw, det_d
-        except Exception as e:
-            all_j = [int(x) for x in (getattr(evaluator, "J", []) or [])]
-            det_d = {
-                "unscheduled_tasks": all_j,
-                "penalties": {
-                    "tail_cell_conflict": 1.0,
-                    "cell_conflict_pairs": 1e9,
-                    "cell_conflict_overlap_time": 1e9,
-                },
-                "error": repr(e),
-            }
-            return float(fail_cost), det_d
-
-    evaluator.evaluate = _eval_safe
 def _safe_evaluate(
     evaluator: RobustEvaluator,
     routes: Dict[int, List[int]],
     shelf_seq: Dict[int, List[int]],
     place: Dict[int, int],
     *,
-    fail_cost: float = float("inf"),
+    fail_cost: float = 1e30,
 ) -> Tuple[float, Dict[str, Any]]:
     """
-    保护性 evaluate：异常不炸 ALNS。
-    - 正常：返回 obj_raw（允许 inf/NaN 原样返回）+ det
-    - 异常：返回 fail_cost（默认 inf）+ 极差 details
+    保护性 evaluate：任何异常（KeyError 等）都不会把 ALNS 整体炸掉。
+    出错时返回一个“非常不可行”的 details，让 infeas-key 变大、自动被拒绝/淘汰。
     """
     try:
         obj, det = evaluator.evaluate(routes, shelf_seq, place)
-        obj_raw = float(obj)  # 允许 inf / NaN 原样返回
+        obj_f = float(obj)
+        if not math.isfinite(obj_f):
+            obj_f = float(fail_cost)
         det_d = dict(det) if isinstance(det, dict) else {}
-        return obj_raw, det_d
+        return obj_f, det_d
     except Exception as e:
+        # 让 infeas_key 极大：unscheduled 全部任务 + 大 cell_conflict
         all_j = [int(x) for x in (getattr(evaluator, "J", []) or [])]
         det_d: Dict[str, Any] = {
             "unscheduled_tasks": all_j,
@@ -202,6 +170,7 @@ def _safe_evaluate(
         }
         return float(fail_cost), det_d
 
+
 def _normalize_one_route_ws_and_shelf(
     seq: List[int],
     *,
@@ -213,11 +182,9 @@ def _normalize_one_route_ws_and_shelf(
     单条 route 的统一规范化：
       1) 连续同 WS 的块内按 ws_fixed_seq 排序
       2) 同一 shelf 链的任务在 route 内 slot 内按 shelf_seq 顺序排序
-      3) ✅ 再做一次 WS block 排序，避免第2步 slot 交换破坏 WS block 内顺序
     """
     seq2 = _normalize_one_route_ws_blocks([int(x) for x in (seq or [])], evaluator)
     seq2 = _normalize_one_route_shelf_slots(seq2, chain_of, shelf_idx)
-    seq2 = _normalize_one_route_ws_blocks(seq2, evaluator)
     return seq2
 
 def _sanitize_task_shelf_mapping(
@@ -404,28 +371,7 @@ def _infeas_key(details, evaluator):
     # 量化到 0.01 精度，避免 float 比较抖动
     cell_score = int(round(cell_measure * 100))
     return (unscheduled, tail, cell_score)
-def _safe_infeas_key(obj: float, details: dict, evaluator: RobustEvaluator) -> Tuple[int, int, int]:
-    """
-    obj=inf/NaN => 极差不可行，避免被当 (0,0,0)。
-    """
-    try:
-        if obj is None or (not math.isfinite(float(obj))):
-            return (10**9, 1, 10**9)
-    except Exception:
-        return (10**9, 1, 10**9)
-    return _infeas_key(details if isinstance(details, dict) else {}, evaluator)
 
-
-def _safe_infeas_scalar(obj: float, details: dict, evaluator: RobustEvaluator) -> float:
-    """
-    obj=inf/NaN => 极差不可行，避免 infeas-SA 分支误接受。
-    """
-    try:
-        if obj is None or (not math.isfinite(float(obj))):
-            return 1e18
-    except Exception:
-        return 1e18
-    return _infeas_scalar(details if isinstance(details, dict) else {}, evaluator)
 def _infeas_scalar(details, evaluator):
     # 给“偶尔接受更差不可行度”用：尺度不要像 1e4 那么夸张
     unscheduled, tail, cell_measure = _infeas_components(details, evaluator)
@@ -460,28 +406,6 @@ def _normalize_ws_blocks(routes: Dict[int, List[int]], evaluator: RobustEvaluato
     for r in list(routes.keys()):
         routes[r] = _reorder_one(routes[r])
     return routes
-def _normalize_for_eval(
-    routes: Dict[int, List[int]],
-    *,
-    evaluator: RobustEvaluator,
-    shelf_seq: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]],
-    do_route_shelf_sync: bool,
-) -> Dict[int, List[int]]:
-    """
-    ✅ 统一的“评估前 normalize 口径”：
-      1) WS block 内排序（_normalize_ws_blocks）
-      2) （可选）route ↔ shelf_seq 顺序一致性修复（normalize_routes_by_shelf_seq_order）
-      3) 若做过第2步，再做一次 WS block 排序（避免 shelf slot 交换破坏 WS block 内顺序）
-    """
-    routes2 = _normalize_ws_blocks(routes, evaluator)
-
-    if bool(do_route_shelf_sync):
-        routes2 = normalize_routes_by_shelf_seq_order(routes2, shelf_seq, task_shelf_mapping)
-        # ✅ 关键补丁：shelf slot 交换后再排一次 WS block，避免 WS 内部顺序被破坏
-        routes2 = _normalize_ws_blocks(routes2, evaluator)
-
-    return routes2
 def _ws_block_boundary_positions(seq: List[int], pi: Dict[int, int]) -> List[int]:
     """
     返回 route 上“WS 块边界”插入点：0、每次 WS 变化的位置、len(seq)
@@ -1838,7 +1762,7 @@ def repair_greedy_insert_with_place(
     force_all_shelves: bool = False,
     max_agv_candidates: Optional[int] = None,
     max_pos_per_route: Optional[int] = None,
-    extra_pos_samples: int = 4,
+
     # ✅ 评估预算
     max_evals_per_task: Optional[int] = None,
     max_evals_total: Optional[int] = None,
@@ -1847,9 +1771,6 @@ def repair_greedy_insert_with_place(
     # ✅ cheap 预筛选（核心）
     preselect_m: int = 12,
     preselect_per_pos_shelves: int = 2,
-
-    # ✅ shelf 回库位候选总数封顶（防爆/提速）
-    shelf_cand_cap_total: int = 40,
 
     # ✅ 新增：如果提供 removed_order，则严格按该顺序插回（seed-first）
     removed_order: Optional[List[int]] = None,
@@ -1884,6 +1805,7 @@ def repair_greedy_insert_with_place(
     # 1) 生成插回顺序 removed_list
     # --------------------------
     if removed_order is not None:
+        # 严格按给定顺序，但要去重 & 与 removed_set 对齐
         base_set = removed_set if removed_set else set(int(x) for x in removed_order)
         seen = set()
         ordered = []
@@ -1893,6 +1815,7 @@ def repair_greedy_insert_with_place(
                 ordered.append(xx)
                 seen.add(xx)
 
+        # 如果 removed_set 有额外任务（理论上不该发生），补到末尾（按 ws 排）
         rest = [int(x) for x in base_set if int(x) not in seen]
         rng.shuffle(rest)
         rest.sort(key=lambda j: (_ws_rank(j), rng.random()))
@@ -1913,17 +1836,20 @@ def repair_greedy_insert_with_place(
         shelf_init_override=shelf_init_override,
     )
 
+    # succ_on_chain：cheap 里可轻微考虑链后继
     succ_on_chain: Dict[int, int] = {}
     for t, prev in (pre.pred_on_chain or {}).items():
         if prev is not None:
             succ_on_chain[int(prev)] = int(t)
 
+    # remaining_unfixed：当前 routes 中缺失的任务集合（用于 tail 冲突忽略）
     all_tasks: Set[int] = set(int(x) for x in evaluator.J)
     present_tasks: Set[int] = set()
     for seq in routes.values():
         present_tasks.update(int(x) for x in (seq or []))
     remaining_unfixed: Set[int] = (all_tasks - present_tasks) | set(int(x) for x in removed_list)
 
+    # 距离引用（局部变量更快）
     d_s_s = getattr(evaluator, "d_s_s", {}) or {}
     d_s_pi = getattr(evaluator, "d_s_pi", {}) or {}
     d_pi_s = getattr(evaluator, "d_pi_s", {}) or {}
@@ -1963,6 +1889,9 @@ def repair_greedy_insert_with_place(
         end_s: int,
         base_seq: List[int],
     ) -> float:
+        """
+        cheap 分数：越小越好。只用局部距离结构估计增量，不做仿真。
+        """
         j = int(j); r = int(r); pos = int(pos); end_s = int(end_s)
 
         hb = pre.home_before(j, place)
@@ -2019,39 +1948,26 @@ def repair_greedy_insert_with_place(
             rng=rng,
             force_all_shelves=force_all_shelves,
             extra_random_shelves=extra_random_shelves,
-            cap_total=int(shelf_cand_cap_total),
+            cap_total=40,
         )
 
         agv_cands = _pick_agv_candidates()
 
         # ===== 1) 规则剪枝 + cheap 预筛选 =====
+        # cheap_pool: (cheap, r, pos, s, seq_ins)
         cheap_pool: List[Tuple[float, int, int, int, List[int]]] = []
 
         for r in agv_cands:
             r = int(r)
             base_seq = routes[r]
             pos_list = _ws_block_boundary_positions(base_seq, evaluator.pi)
-            # Add random interior insertion points so repair can split long WS blocks.
-            L_base = len(base_seq)
-            k_extra = max(0, int(extra_pos_samples))
-            if L_base >= 2 and k_extra > 0:
-                if max_pos_per_route is not None:
-                    k_extra = min(k_extra, max(0, int(max_pos_per_route) // 3))
-                if k_extra > 0:
-                    all_pos = list(range(L_base + 1))
-                    extra = rng.sample(all_pos, min(k_extra, len(all_pos)))
-                    pos_list = sorted(set(pos_list + extra))
 
             if max_pos_per_route is not None and len(pos_list) > int(max_pos_per_route):
-                L = len(base_seq)
-                must = sorted(set([0, L]))
-                mid = [p for p in pos_list if p not in set(must)]
+                must = [0, len(base_seq)]
+                mid = [p for p in pos_list if p not in must]
                 need = max(0, int(max_pos_per_route) - len(must))
-                if need <= 0:
-                    pos_list = must
-                else:
-                    pick = rng.sample(mid, min(need, len(mid))) if mid else []
-                    pos_list = sorted(set(must + pick))
+                pick = rng.sample(mid, min(need, len(mid))) if (need > 0 and mid) else []
+                pos_list = sorted(set(must + pick))
 
             seen_route_keys: Set[Tuple[int, Tuple[int, ...]]] = set()
 
@@ -2061,6 +1977,7 @@ def repair_greedy_insert_with_place(
                 seq_ins = base_seq[:]
                 seq_ins.insert(pos, j)
 
+                # ✅ route 内统一规范化（WS块 + shelf slot）
                 seq_ins = _normalize_one_route_ws_and_shelf(
                     seq_ins,
                     evaluator=evaluator,
@@ -2073,6 +1990,7 @@ def repair_greedy_insert_with_place(
                     continue
                 seen_route_keys.add(key)
 
+                # 规则剪枝：过滤 end_s
                 ok_s: List[int] = []
                 for s in cand_shelves:
                     ss = int(s)
@@ -2081,10 +1999,10 @@ def repair_greedy_insert_with_place(
                         r=r,
                         pos=pos,
                         end_s=ss,
-                        routes=routes,
+                        routes=routes,      # base routes（不含 j）
                         place=place,
                         used_tail_cells=used_tail,
-                        strict_move1=False,
+                        strict_move1=False, # 仍保持保守
                     )
                     if ok:
                         ok_s.append(ss)
@@ -2100,6 +2018,7 @@ def repair_greedy_insert_with_place(
                     cheap_pool.append((float(c), int(r), int(pos), int(ss), list(seq_ins)))
 
         if not cheap_pool:
+            # 兜底：最短车尾插
             r_fb = _least_loaded_agv(routes, R_ids)
             routes[int(r_fb)].append(j)
             routes[int(r_fb)] = _normalize_one_route_ws_and_shelf(
@@ -2112,15 +2031,13 @@ def repair_greedy_insert_with_place(
             remaining_unfixed.discard(int(j))
             continue
 
+        # 全局保留 cheap 最好的前 preselect_m 个
         cheap_pool.sort(key=lambda x: x[0])
         cheap_pool = cheap_pool[: max(1, int(preselect_m))]
 
-        # ===== 2) 精评少量候选（safe key + 防异常拖死）=====
+        # ===== 2) 精评少量候选（safe evaluate）=====
         scored_cands: List[Tuple[Tuple[int, int, int], float, int, int, int, List[int]]] = []
-        # (key, obj_sort, r, pos, s, seq_ins)
-
-        error_cnt = 0
-        stop_due_to_errors = False
+        # (infeas_key, obj, r, pos, s, seq_ins)
 
         for _, rr, pp, ss, seq_ins in cheap_pool:
             if (max_evals_total is not None) and (eval_used_total >= int(max_evals_total)):
@@ -2134,24 +2051,12 @@ def repair_greedy_insert_with_place(
             routes[rr] = seq_ins
             place[j] = int(ss)
             try:
-                obj_raw, det = _safe_evaluate(evaluator, routes, shelf_seq, place)
-                det_d = dict(det) if isinstance(det, dict) else {}
-
-                key = _safe_infeas_key(obj_raw, det_d, evaluator)
-
-                obj_sort = float(obj_raw)
-                if (not math.isfinite(float(obj_sort))) or (key[0] >= 10**8):
-                    obj_sort = 1e30
-
-                scored_cands.append((tuple(key), float(obj_sort), int(rr), int(pp), int(ss), list(seq_ins)))
+                obj_f, det = _safe_evaluate(evaluator, routes, shelf_seq, place)
+                key = _infeas_key(det, evaluator)
+                scored_cands.append((tuple(key), float(obj_f), int(rr), int(pp), int(ss), list(seq_ins)))
 
                 eval_used_task += 1
                 eval_used_total += 1
-
-                if det_d.get("error") is not None:
-                    error_cnt += 1
-                    if error_cnt >= 10:
-                        stop_due_to_errors = True
             finally:
                 routes[rr] = old_seq
                 if old_place is None:
@@ -2159,14 +2064,13 @@ def repair_greedy_insert_with_place(
                 else:
                     place[j] = int(old_place)
 
-            if stop_due_to_errors:
-                break
-
         if not scored_cands:
+            # 没有精评候选：直接用 cheap 最好者落地（不再额外 evaluate）
             _, rr, pp, ss, seq_ins = cheap_pool[0]
             routes[int(rr)] = list(seq_ins)
             place[j] = int(ss)
         else:
+            # ✅ infeas_key 优先，再按 obj
             scored_cands.sort(key=lambda x: (x[0], x[1]))
             kpick = min(max(1, int(top_k_random)), len(scored_cands))
             _, _, rr, pp, ss, seq_ins = rng.choice(scored_cands[:kpick])
@@ -2177,6 +2081,7 @@ def repair_greedy_insert_with_place(
         remaining_unfixed.discard(int(j))
 
     return routes, place
+
 def repair_greedy_insert_with_place_ordered(
     *,
     routes: Dict[int, List[int]],
@@ -2194,19 +2099,14 @@ def repair_greedy_insert_with_place_ordered(
     force_all_shelves: bool = False,
     max_agv_candidates: Optional[int] = None,
     max_pos_per_route: Optional[int] = None,
-    extra_pos_samples: int = 4,
+
     # ✅ 评估预算（跨任务共享）
     max_evals_per_task: Optional[int] = None,
     max_evals_total: Optional[int] = None,
-
-    # ✅ 透传：cheap 预筛选 / 候选封顶
-    preselect_m: int = 12,
-    preselect_per_pos_shelves: int = 2,
-    shelf_cand_cap_total: int = 40,
 ) -> Tuple[Dict[int, List[int]], Dict[int, int]]:
     """
     Ordered repair：严格按 removed_order 插回（seed-first）。
-    单次 repair，共享缓存与总预算。
+    现在改成“单次 repair”，共享缓存与总预算，速度会明显提升。
     """
     removed_order = [int(x) for x in (removed_order or [])]
     removed_set = set(int(x) for x in removed_order)
@@ -2217,7 +2117,7 @@ def repair_greedy_insert_with_place_ordered(
         place=place,
         evaluator=evaluator,
         removed=removed_set,
-        removed_order=removed_order,
+        removed_order=removed_order,  # ✅ 核心：顺序由这里控制
         rng=rng,
         S_near_by_j=S_near_by_j,
         task_shelf_mapping=task_shelf_mapping,
@@ -2228,14 +2128,11 @@ def repair_greedy_insert_with_place_ordered(
         force_all_shelves=force_all_shelves,
         max_agv_candidates=max_agv_candidates,
         max_pos_per_route=max_pos_per_route,
-        extra_pos_samples=extra_pos_samples,
         max_evals_per_task=max_evals_per_task,
         max_evals_total=max_evals_total,
-        preselect_m=preselect_m,
-        preselect_per_pos_shelves=preselect_per_pos_shelves,
-        shelf_cand_cap_total=shelf_cand_cap_total,
         copy_inputs=True,
     )
+
 # =========================
 #        Local moves
 # =========================
@@ -2252,79 +2149,36 @@ def local_place_tune_once(
     top_k_try: int = 4,
     global_try_tasks: int = 0,
 
-    # ✅ 总预算 + 候选封顶（防爆）
+    # ✅ 新增：总预算 + 候选封顶（防爆）
     max_evals: Optional[int] = 200,
     cap_total: int = 60,
 ) -> Tuple[Dict[int, int], bool]:
     """
-    place 微调（key-first 版）：
-      - 评价标准：minimize (infeas_key, obj) lexicographically
-        * 先最小化 infeas_key = (unscheduled_cnt, tail_conflict_flag, cell_conflict_score)
-        * infeas_key 相同再最小化 obj
-      - 这样在 obj=inf 或不可行阶段，也能靠 infeas_key 把冲突/未排任务逐步压到 0
-      - 仍保留 max_evals & cap_total 防爆
+    place 微调（防爆版）：
+      - 常规任务：只试近邻 top_k_try
+      - 关键任务：不再“全 S”，而是补足采样到 cap_total
+      - 总评估次数受 max_evals 控制
     """
     improved = False
     place = _dc_place(place)
 
-    # routes 固定：只做一次 WS-block 规范化，避免内层重复开销
     routes_norm = _normalize_ws_blocks(routes, evaluator)
+    base_obj, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
+    base_obj = float(base_obj)
 
-    # 预构建规则预检器：blocked cell / tail 唯一回库位 / 缺距离 key 等
-    pre = build_rule_prechecker(
-        evaluator=evaluator,
-        shelf_seq=shelf_seq,
-        task_shelf_mapping=task_shelf_mapping,
-        shelf_init_override=shelf_init_override,
-    )
-
-    def _key_for_tune(obj_raw: float, det: Any) -> Tuple[int, int, int]:
-        """
-        place-tune 专用 key：
-          - obj 有限：用 _safe_infeas_key（本质上就是按 det 解析）
-          - obj 非有限：如果 det 有信息，用 _infeas_key(det) 来“比较不可行度的好坏”
-                      若 det 信息不足导致 (0,0,0)，则兜底为极差
-        """
-        det_d = dict(det) if isinstance(det, dict) else {}
-        try:
-            obj_v = float(obj_raw)
-        except Exception:
-            obj_v = float("inf")
-
-        if math.isfinite(obj_v):
-            return tuple(_safe_infeas_key(obj_v, det_d, evaluator))
-
-        key_det = tuple(_infeas_key(det_d, evaluator))
-        if key_det == (0, 0, 0):
-            return (10**9, 1, 10**9)
-        return key_det
-
-    def _obj_float(obj_raw: float) -> float:
-        try:
-            return float(obj_raw)
-        except Exception:
-            return float("inf")
-
-    # 基准
-    base_obj_raw, base_det = _safe_evaluate(evaluator, routes_norm, shelf_seq, place)
-    base_key = _key_for_tune(base_obj_raw, base_det)
-    base_obj = _obj_float(base_obj_raw)
-
+    eval_used = 0
     budget = None if max_evals is None else max(0, int(max_evals))
 
     keys = [int(j) for j in place.keys()]
 
-    # --- 选关键任务：按 q 最大（只用来决定“谁用更大候选集”） ---
+    # --- 选关键任务：按 q 最大 ---
     global_set: Set[int] = set()
     q_map: Dict[int, float] = {}
-    if isinstance(base_det, dict):
-        q_raw = base_det.get("q", {}) or {}
+    if isinstance(diag, dict):
+        q_raw = diag.get("q", {}) or {}
         for j in keys:
             if int(j) in q_raw:
-                try:
-                    q_map[int(j)] = float(q_raw[int(j)])
-                except Exception:
-                    pass
+                q_map[int(j)] = float(q_raw[int(j)])
 
     if global_try_tasks and keys:
         if q_map:
@@ -2347,23 +2201,16 @@ def local_place_tune_once(
     rng.shuffle(rest)
     order.extend(rest)
 
-    # tail 任务集合（用于 tail 唯一回库位）
-    tail_tasks: Set[int] = set(int(t) for t in (pre.tail_task_of_chain or {}).values())
-
     for j in order:
         j = int(j)
-        if budget is not None and budget <= 0:
-            break
-        if j not in place:
-            continue
-
         s_now = int(place[j])
 
-        # 每个 j 重算一次 tail 占用（因为前面可能改了 place）
-        used_tail = pre.build_used_tail_cells(place=place, ignore_tasks={j})
+        if budget is not None and budget <= 0:
+            break
 
         # 构造候选
         if j in global_set:
+            # 关键任务：采样补足到 cap_total（不全 S）
             cands_base = _cand_end_shelves_for_task(
                 int(j),
                 place=place,
@@ -2400,67 +2247,36 @@ def local_place_tune_once(
         if s_now not in cands:
             cands.append(s_now)
 
-        # ========== 规则过滤（便宜但省很多无意义 evaluate） ==========
-        cands_f: List[int] = []
-        c_of_j = pre.chain_of.get(int(j), None)
-        is_tail = (int(j) in tail_tasks)
+        best_s = s_now
+        best_obj = float(base_obj)
 
         for s in cands:
-            ss = int(s)
-            if ss not in pre.S_set:
-                continue
-            if ss in pre.blocked_cells:
-                continue
-
-            # tail 任务：end_s 不允许与其他链 tail 冲突
-            if is_tail and (c_of_j is not None):
-                owner = used_tail.get(int(ss), None)
-                if owner is not None and int(owner) != int(c_of_j):
-                    continue
-
-            # 缺少 d_pi_s(j, s) 基本必炸/必退化
-            if not _has_key(pre.d_pi_s, (int(j), int(ss))):
-                continue
-
-            cands_f.append(int(ss))
-
-        if not cands_f:
-            continue
-
-        best_s = s_now
-        best_key_local = tuple(base_key)
-        best_obj_local = float(base_obj)
-
-        for s in cands_f:
             s = int(s)
             if s == s_now:
                 continue
+
             if budget is not None and budget <= 0:
                 break
 
             cand_place = _dc_place(place)
             cand_place[j] = s
-
-            obj_raw, det = _safe_evaluate(evaluator, routes_norm, shelf_seq, cand_place)
+            obj, _ = evaluator.evaluate(routes_norm, shelf_seq, cand_place)
+            eval_used += 1
             if budget is not None:
                 budget -= 1
 
-            k_cand = _key_for_tune(obj_raw, det)
-            obj_cand = _obj_float(obj_raw)
-
-            # 词典序：先 key 再 obj
-            if (k_cand < best_key_local) or (k_cand == best_key_local and obj_cand < best_obj_local - 1e-9):
-                best_key_local = tuple(k_cand)
-                best_obj_local = float(obj_cand)
-                best_s = int(s)
+            obj = float(obj)
+            if obj < best_obj - 1e-9:
+                best_obj = obj
+                best_s = s
 
         if best_s != s_now:
-            place[j] = int(best_s)
-            base_key = tuple(best_key_local)
-            base_obj = float(best_obj_local)
+            place[j] = best_s
+            base_obj = best_obj
             improved = True
 
     return place, improved
+
 
 def intensify_shelf_seq_promote_critical_ws_once(
     *,
@@ -2692,8 +2508,7 @@ def cross_vehicle_move_once(
             return all_pos
 
         must = set(_ws_block_boundary_positions(seq, evaluator.pi))
-        must.add(0)
-        must.add(L)
+        must.add(0); must.add(L)
         must_list = sorted(must)
 
         if len(must_list) >= k:
@@ -2731,12 +2546,14 @@ def cross_vehicle_move_once(
         )
         if not cands:
             cands = [min(int(s) for s in evaluator.S)]
+        # 再截断
         if len(cands) > int(max_s_samples):
             head = cands[: int(max_s_samples)]
             tail = cands[int(max_s_samples):]
             if tail:
                 head.append(int(rng.choice(tail)))
             cands = head
+        # 去重
         out, seen = [], set()
         for s in cands:
             s = int(s)
@@ -2745,6 +2562,7 @@ def cross_vehicle_move_once(
                 seen.add(s)
         return out
 
+    # 候选池： (lb, cand_routes, cand_place)
     cand_pool: List[Tuple[float, Dict[int, List[int]], Dict[int, int]]] = []
 
     # ========== 1) relocate 候选 ==========
@@ -2771,12 +2589,13 @@ def cross_vehicle_move_once(
 
             for s in s_cands:
                 s = int(s)
+
                 ok, _ = pre.check_insert_candidate(
                     j=j,
                     r=r_to,
                     pos=pos,
                     end_s=s,
-                    routes=routes,   # relocate 不需要删除 r_from 才能过 "already_in_route"
+                    routes=routes,   # base routes（不含 j）
                     place=place,
                     used_tail_cells=used_tail,
                     strict_move1=False,
@@ -2791,22 +2610,18 @@ def cross_vehicle_move_once(
                 cand_place = _dc_place(place)
                 cand_place[j] = s
 
-                lb = proxy.solution_lb(
-                    routes=cand_routes,
-                    place=cand_place,
-                    stop_at=base_obj if math.isfinite(base_obj) else None
-                )
+                # 安全剪枝：LB >= base_obj => 不可能改进
+                lb = proxy.solution_lb(routes=cand_routes, place=cand_place, stop_at=base_obj if math.isfinite(base_obj) else None)
                 if math.isfinite(base_obj) and lb >= base_obj - 1e-9:
                     continue
 
                 cand_pool.append((float(lb), cand_routes, cand_place))
 
-    # ========== 2) swap 候选（✅修复版） ==========
+    # ========== 2) swap 候选 ==========
     if try_swap and len(nonempty) >= 2:
         for _ in range(max(1, int(max_trials))):
             r1, r2 = rng.sample(nonempty, 2)
-            r1 = int(r1)
-            r2 = int(r2)
+            r1 = int(r1); r2 = int(r2)
             if not routes[r1] or not routes[r2]:
                 continue
 
@@ -2815,68 +2630,41 @@ def cross_vehicle_move_once(
             pos_a = int(routes[r1].index(a))
             pos_b = int(routes[r2].index(b))
 
-            # ✅ base routes：先把 a/b 从各自车里删掉，避免 precheck 被 task_already_in_route 卡死
-            base_routes = _dc_routes(routes)
-            base_routes[r1] = [x for x in base_routes[r1] if int(x) != int(a)]
-            base_routes[r2] = [x for x in base_routes[r2] if int(x) != int(b)]
-
-            # 然后插入：r1 放 b，r2 放 a
-            seq1 = list(base_routes[r1])
-            seq2 = list(base_routes[r2])
-            seq1.insert(pos_a, int(b))
-            seq2.insert(pos_b, int(a))
+            seq1 = list(routes[r1]); seq2 = list(routes[r2])
+            seq1[pos_a] = int(b)
+            seq2[pos_b] = int(a)
             seq1 = _normalize_one_route_ws_blocks(seq1, evaluator)
             seq2 = _normalize_one_route_ws_blocks(seq2, evaluator)
 
-            sA = _top_shelves(a)  # a 的 end_s 候选
-            sB = _top_shelves(b)  # b 的 end_s 候选
+            sA = _top_shelves(a)
+            sB = _top_shelves(b)
             used_tail = pre.build_used_tail_cells(place=place, ignore_tasks={a, b})
 
             for sa in sA:
-                sa = int(sa)
                 for sb in sB:
-                    sb = int(sb)
+                    sa = int(sa); sb = int(sb)
 
-                    # ✅ 正确的 precheck：b -> r1@pos_a, a -> r2@pos_b
-                    ok_b, _ = pre.check_insert_candidate(
-                        j=b,
-                        r=r1,
-                        pos=pos_a,
-                        end_s=sb,
-                        routes=base_routes,
-                        place=place,
-                        used_tail_cells=used_tail,
+                    okA, _ = pre.check_insert_candidate(
+                        j=a, r=r1, pos=pos_a, end_s=sa,
+                        routes=routes, place=place, used_tail_cells=used_tail,
                         strict_move1=False,
                     )
-                    if not ok_b:
-                        continue
-
-                    ok_a, _ = pre.check_insert_candidate(
-                        j=a,
-                        r=r2,
-                        pos=pos_b,
-                        end_s=sa,
-                        routes=base_routes,
-                        place=place,
-                        used_tail_cells=used_tail,
+                    okB, _ = pre.check_insert_candidate(
+                        j=b, r=r2, pos=pos_b, end_s=sb,
+                        routes=routes, place=place, used_tail_cells=used_tail,
                         strict_move1=False,
                     )
-                    if not ok_a:
+                    if not (okA and okB):
                         continue
 
-                    cand_routes = _dc_routes(base_routes)
+                    cand_routes = _dc_routes(routes)
                     cand_routes[r1] = seq1
                     cand_routes[r2] = seq2
-
                     cand_place = _dc_place(place)
                     cand_place[a] = sa
                     cand_place[b] = sb
 
-                    lb = proxy.solution_lb(
-                        routes=cand_routes,
-                        place=cand_place,
-                        stop_at=base_obj if math.isfinite(base_obj) else None
-                    )
+                    lb = proxy.solution_lb(routes=cand_routes, place=cand_place, stop_at=base_obj if math.isfinite(base_obj) else None)
                     if math.isfinite(base_obj) and lb >= base_obj - 1e-9:
                         continue
 
@@ -2886,16 +2674,20 @@ def cross_vehicle_move_once(
         return routes, place, False, base_obj
 
     cand_pool.sort(key=lambda x: x[0])
+
+    # ★强制封顶，防止你外面忘记调参
     eval_k = min(max(1, int(max_evals)), 12, len(cand_pool))
 
     for i in range(eval_k):
         _, cand_routes, cand_place = cand_pool[i]
+        # cand_routes 已保持 route-level normalize，无需全量 normalize
         obj, _ = evaluator.evaluate(cand_routes, shelf_seq, cand_place)
         obj = float(obj)
         if obj < base_obj - 1e-9:
             return cand_routes, cand_place, True, obj
 
     return routes, place, False, base_obj
+
 
 def cross_vehicle_block_move_once(
     *,
@@ -3273,148 +3065,41 @@ def alns_minimize(
     shelf_init: Optional[Dict[int, int]] = None,
     ws_order_idx: Optional[Dict[int, Dict[int, int]]] = None,
 
+    # ✅ 新增：是否启用“鲁棒敏感 destroy”
     enable_robust_destroy: bool = True,
-
-    # ✅ 消融/工程开关
-    enable_route_shelf_sync: bool = False,  # A 实验：关掉 route↔shelf 同步
-    route_shelf_sync_every: int = 20,  # 若>0：每隔 N 轮也同步一次；若=0：只在 shelf_seq 改动时同步
-    enable_gate: bool = True,  # C 实验：关 gate => 每轮都做 heavy local
-    enable_adaptive_update: bool = True,  # D 实验：关自适应更新（权重冻结）
-    extra_pos_samples: int = 4,  # B 实验：0=只边界；>0=边界+随机内点
 ):
     assert S_near_by_j is not None, "需要提供 S_near_by_j 作为回库位候选集"
     rng = random.Random(seed)
-    patch_evaluator_evaluate_safe(evaluator)  # ✅加这一行
     task_shelf_mapping = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=True)
-    enable_route_shelf_sync = bool(enable_route_shelf_sync)
-    enable_gate = bool(enable_gate)
-    enable_adaptive_update = bool(enable_adaptive_update)
-    route_shelf_sync_every = int(route_shelf_sync_every) if route_shelf_sync_every is not None else 0
 
-    def _should_sync_route_shelf(it: int, shelf_seq_changed: bool) -> bool:
-        """
-        ✅ route↔shelf 同步触发策略：
-          - enable_route_shelf_sync=False：永不触发（用于消融 A）
-          - shelf_seq_changed=True：必触发（避免 shelf_seq 改了之后 routes 死锁/语义漂移）
-          - route_shelf_sync_every>0：额外每隔 N 轮触发一次（低频修复）
-        """
-        if not enable_route_shelf_sync:
-            return False
-        if bool(shelf_seq_changed):
-            return True
-        if int(route_shelf_sync_every) > 0:
-            return (int(it) % int(route_shelf_sync_every)) == 0
-        return False
-    # =========================
     # =========================
     # 规模自适应控参（提速关键）
     # =========================
     n_tasks = len(list(evaluator.J))
     n_s = len(list(evaluator.S))
 
-    # ---- baseline by n_tasks ----
     if n_tasks <= 30:
         max_agv_candidates = None
         max_pos_per_route = None
         max_place_try_each_base = 8
-        repair_preselect_m_base = 12
-        repair_preselect_per_pos_base = 2
-        repair_shelf_cap_total_base = 40
     else:
         max_agv_candidates = 3
         max_pos_per_route = 15
         max_place_try_each_base = 5
-        repair_preselect_m_base = 8
-        repair_preselect_per_pos_base = 1
-        repair_shelf_cap_total_base = 30
-
-    # ---- big-S tightening ----
     if n_s >= 300:
         max_place_try_each_base = min(max_place_try_each_base, 4)
-        repair_shelf_cap_total_base = min(repair_shelf_cap_total_base, 25)
-
-    # ✅ small-|S| override：候选空间很小，别为了提速把“可行性修复”剪死
-    # 你的实例 |S|=12 属于典型：必须敢于“全 S 尝试”，否则 cell 冲突很难消掉。
-    if n_s <= 20:
-        max_agv_candidates = None  # 全车都允许尝试
-        max_pos_per_route = None  # 全位置都允许尝试
-        max_place_try_each_base = max(max_place_try_each_base, int(n_s))  # 近似=全S
-        repair_preselect_m_base = max(repair_preselect_m_base, 24)
-        repair_preselect_per_pos_base = max(repair_preselect_per_pos_base, 3)
-        repair_shelf_cap_total_base = max(repair_shelf_cap_total_base, int(n_s))
-
-    # Repair insertion-point control: avoid unresolved references and cap explosion on large instances.
-    extra_pos_samples_base = max(0, int(extra_pos_samples))
-    if n_tasks > 30:
-        extra_pos_samples_base = min(extra_pos_samples_base, 2)
-    if n_s >= 300:
-        extra_pos_samples_base = min(extra_pos_samples_base, 2)
 
     best = copy.deepcopy(init)
     best.routes = _dc_routes(best.routes)
     best.place = _dc_place(best.place)
     best.shelf_seq = _dc_shelf_seq(best.shelf_seq)
 
-    best.routes = _normalize_for_eval(
-        best.routes,
-        evaluator=evaluator,
-        shelf_seq=best.shelf_seq,
-        task_shelf_mapping=task_shelf_mapping,
-        do_route_shelf_sync=_should_sync_route_shelf(0, shelf_seq_changed=True),
-    )
+    best.routes = _normalize_ws_blocks(best.routes, evaluator)
+    best.routes = normalize_routes_by_shelf_seq_order(best.routes, best.shelf_seq, task_shelf_mapping)
+    best_obj, best_details = evaluator.evaluate(best.routes, best.shelf_seq, best.place)
 
-    # ======== ✅ safe evaluate + safe key ========
-    best_obj, best_details = _safe_evaluate(evaluator, best.routes, best.shelf_seq, best.place)
-    best_details = dict(best_details) if isinstance(best_details, dict) else {}
-    best_key = _safe_infeas_key(best_obj, best_details, evaluator)
-
-    # ======== ✅ Bootstrap：初始缺任务/unscheduled 先强修一轮 ========
-    missing0 = _missing_tasks_in_routes(best.routes, evaluator)
-    uns0 = set(int(x) for x in (best_details.get("unscheduled_tasks", []) or [])) if isinstance(best_details, dict) else set()
-    to_fix0 = set(int(x) for x in (missing0 | uns0))
-
-    if to_fix0:
-        boot_preselect_m = 16 if n_tasks <= 30 else 10
-        boot_per_pos = 2 if n_tasks <= 30 else 1
-        boot_cap_total = max(repair_shelf_cap_total_base, 40 if n_tasks <= 30 else repair_shelf_cap_total_base)
-        boot_evals_per_task = 45 if n_tasks <= 30 else 30
-        boot_evals_total = 260 if n_tasks <= 30 else 200
-
-        best.routes, best.place = repair_greedy_insert_with_place(
-            routes=best.routes,
-            shelf_seq=best.shelf_seq,
-            place=best.place,
-            evaluator=evaluator,
-            removed=to_fix0,
-            rng=rng,
-            S_near_by_j=S_near_by_j,
-            task_shelf_mapping=task_shelf_mapping,
-            shelf_init_override=shelf_init,
-            max_place_try_each=max_place_try_each_base,
-            top_k_random=2,
-            extra_random_shelves=1,
-            force_all_shelves=True,
-            max_agv_candidates=max_agv_candidates,
-            max_pos_per_route=max_pos_per_route,
-            extra_pos_samples=extra_pos_samples_base,
-            max_evals_per_task=boot_evals_per_task,
-            max_evals_total=boot_evals_total,
-            preselect_m=boot_preselect_m,
-            preselect_per_pos_shelves=boot_per_pos,
-            shelf_cand_cap_total=boot_cap_total,
-            copy_inputs=False,
-        )
-        best.routes = _normalize_for_eval(
-            best.routes,
-            evaluator=evaluator,
-            shelf_seq=best.shelf_seq,
-            task_shelf_mapping=task_shelf_mapping,
-            do_route_shelf_sync=_should_sync_route_shelf(0, shelf_seq_changed=True),
-        )
-
-        best_obj, best_details = _safe_evaluate(evaluator, best.routes, best.shelf_seq, best.place)
-        best_details = dict(best_details) if isinstance(best_details, dict) else {}
-        best_key = _safe_infeas_key(best_obj, best_details, evaluator)
+    best_obj = float(best_obj)
+    best_key = _infeas_key(best_details, evaluator)
 
     cur = copy.deepcopy(best)
     cur_obj = float(best_obj)
@@ -3426,8 +3111,9 @@ def alns_minimize(
     print(f"[ALNS-inner] init_obj = {best_obj:.2f} | init_infeas={best_key}")
 
     # =========================================================
-    # ALNS Adaptive core: destroy/repair weights
+    # ALNS Adaptive core: destroy/repair weights (the "A")
     # =========================================================
+    # destroy 算子池（名字只是标签）
     destroy_names = [
         "rand_small",
         "shaw_related",
@@ -3438,6 +3124,7 @@ def alns_minimize(
         "robust_sensitive",
         "rand_big",
     ]
+    # 初始权重：可以用你原来的概率当“先验”
     init_destroy_w = {
         "rand_small": 1.00,
         "shaw_related": 0.90,
@@ -3451,38 +3138,50 @@ def alns_minimize(
     destroy_pool = AdaptiveOpPool(
         destroy_names,
         init_destroy_w,
-        reaction=0.20 if enable_adaptive_update else 0.0,
+        reaction=0.20,
         segment_len=50,
         w_min=0.05,
         w_max=50.0,
     )
 
+    # repair 算子池（至少两个，才算“有 repair 的自适应”）
     repair_names = ["repair_unordered", "repair_ordered"]
     init_repair_w = {"repair_unordered": 1.0, "repair_ordered": 1.0}
     repair_pool = AdaptiveOpPool(
         repair_names,
         init_repair_w,
-        reaction=0.20 if enable_adaptive_update else 0.0,
+        reaction=0.20,
         segment_len=50,
         w_min=0.05,
         w_max=50.0,
     )
 
+    # 哪些 destroy 必须保留 removed_order 的语义（seed-first / gap-first）
     ordered_required = {"ws_gap_bundle", "ws_idle_gap", "ws_critical", "robust_sensitive"}
 
+    # reward 设计（标准 ALNS）
     SCORE_BEST = 33.0
     SCORE_IMPROVE = 9.0
     SCORE_ACCEPT = 3.0
     SCORE_REJECT = 0.0
 
+    # destroy：正常阶段（你原来的）
+    P_DESTROY_RANDOM_SMALL = 0.40
+    P_DESTROY_RELATED = 0.35
+    P_DESTROY_CHAIN = 0.25
+
+    # 邻域概率（你原来的）
     P_USE_CROSS_VEHICLE = 0.55
     P_USE_CROSS_BLOCK = 0.35
     P_USE_INTRA_2OPT = 0.35
     P_USE_INTRA_OROPT = 0.35
 
+    # 停滞控制（你原来的）
     STAG_WS = 40
     STAG_LIMIT = 120
+    P_WS_FOCUSED = 0.70
 
+    # 回温（你原来的）
     REHEAT_SOFT = 2.50
     REHEAT_STRONG = 6.00
 
@@ -3490,13 +3189,21 @@ def alns_minimize(
     post_shake = 0
     stall = 0
 
+    # ✅ 鲁棒 destroy 只对 gamma>0 有意义；概率做一个温和值（不破坏你现有主力算子）
+    def _robust_destroy_prob(stagnating: bool) -> float:
+        if (not enable_robust_destroy) or (int(getattr(evaluator, "gamma", 0)) <= 0):
+            return 0.0
+        return 0.20 if not stagnating else 0.30
+
     for it in range(max(1, int(iters))):
         improved_best_this_iter = False
 
+        # ✅ 真停滞只由 stall 决定；post_shake 只是“回温窗口”
         stagnating = (stall >= STAG_WS)
         post_mode = (post_shake > 0)
         strong_shake = (stall >= STAG_LIMIT)
 
+        # 温度：停滞或 post_mode 都允许回温（帮助跳局优）
         if stagnating or post_mode:
             T = max(T, REHEAT_SOFT)
         if strong_shake:
@@ -3508,9 +3215,7 @@ def alns_minimize(
             cur_details = dict(best_details) if isinstance(best_details, dict) else {}
             cur_key = tuple(best_key)
 
-        # ✅ 新增：当前是否仍不可行（只要 key != (0,0,0) 或 obj 非有限）
-        infeasible_state = (tuple(cur_key) != (0, 0, 0)) or (not math.isfinite(float(cur_obj)))
-
+        # topk/extra：post_mode 只轻微加力，不要等同 stagnating
         if strong_shake:
             topk_insert = 3
             extra_shelves = 2
@@ -3524,10 +3229,9 @@ def alns_minimize(
             topk_insert = 1
             extra_shelves = 0
 
-        # ✅ 改动二（关键）：不可行时也要强制扩展 shelf 探索
-        # 你的实例 |S|=12 很小，infeasible 时全 S 探索开销也很低，但能显著提高“消冲突”的概率
-        force_all_shelves = bool(strong_shake or infeasible_state or (n_s <= 20))
+        force_all_shelves = bool(strong_shake)
 
+        # ===== 评估预算：以 stall 为主控；post_mode 不要升级成“停滞级别” =====
         if strong_shake:
             repair_evals_per_task = 55
             repair_evals_total = 320
@@ -3541,47 +3245,14 @@ def alns_minimize(
             repair_evals_per_task = 20
             repair_evals_total = 120
 
-        # ✅ 提速开关 2：大实例收紧 cheap 预筛选
-        if n_tasks <= 30:
-            if strong_shake:
-                preselect_m_it = max(repair_preselect_m_base, 16)
-                per_pos_it = max(repair_preselect_per_pos_base, 2)
-                cap_total_it = max(repair_shelf_cap_total_base, 40)
-            elif stagnating:
-                preselect_m_it = max(repair_preselect_m_base, 12)
-                per_pos_it = max(repair_preselect_per_pos_base, 2)
-                cap_total_it = max(repair_shelf_cap_total_base, 40)
-            elif post_mode:
-                preselect_m_it = max(repair_preselect_m_base, 10)
-                per_pos_it = max(repair_preselect_per_pos_base, 2)
-                cap_total_it = repair_shelf_cap_total_base
-            else:
-                preselect_m_it = repair_preselect_m_base
-                per_pos_it = repair_preselect_per_pos_base
-                cap_total_it = repair_shelf_cap_total_base
-        else:
-            preselect_m_it = repair_preselect_m_base
-            per_pos_it = repair_preselect_per_pos_base
-            cap_total_it = repair_shelf_cap_total_base
-            if strong_shake:
-                preselect_m_it = min(12, max(preselect_m_it, 10))
-                cap_total_it = min(35, max(cap_total_it, 30))
-
-        # ✅ 小S且不可行：再加一档探索强度，专门用来把 cell_conflict_pairs 压到 0
-        if infeasible_state and (n_s <= 20):
-            topk_insert = max(topk_insert, 3)
-            extra_shelves = max(extra_shelves, 3)
-
-            repair_evals_per_task = max(repair_evals_per_task, 45)
-            repair_evals_total = max(repair_evals_total, 260)
-
-            preselect_m_it = max(preselect_m_it, 24)
-            per_pos_it = max(per_pos_it, 3)
-            cap_total_it = max(cap_total_it, int(n_s))
-
+        # =====================================================
+        # -------------- 1) destroy + repair --------------
+        # =====================================================
+        # ========== 记录本迭代选中的算子（用于自适应更新）==========
         chosen_destroy = None
         chosen_repair = None
 
+        # ========== 工具：把 removed_set 变成一个“可控插回顺序” ==========
         ws_fixed = getattr(evaluator, "ws_fixed_seq", {}) or {}
         ws_pos = _ws_index(ws_fixed)
         pi = getattr(evaluator, "pi", {}) or {}
@@ -3596,9 +3267,11 @@ def alns_minimize(
             lst.sort(key=lambda x: (_ws_rank_local(x), rng.random()))
             return lst
 
+        # ========== 自适应 destroy+repair 一步走 ==========
         def _adaptive_destroy_repair() -> Tuple[Dict[int, List[int]], Dict[int, int], str, str]:
             nonlocal stagnating, strong_shake, post_mode
 
+            # --------- 1) 选 destroy 候选集（随阶段变）---------
             cand_destroy: List[str] = []
             if strong_shake:
                 cand_destroy = ["ws_gap_bundle", "ws_idle_gap", "rand_big"]
@@ -3617,6 +3290,7 @@ def alns_minimize(
 
             dname = destroy_pool.pick(rng, cand_destroy)
 
+            # --------- 2) 执行 destroy ---------
             if dname == "rand_small":
                 remove_frac = rng.uniform(0.15, 0.35)
                 removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
@@ -3677,6 +3351,7 @@ def alns_minimize(
                     max_k=5,
                 )
                 if not removed_order:
+                    # 兜底：退化随机小删
                     remove_frac = rng.uniform(0.15, 0.35)
                     removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                     removed_order = _order_from_set(removed)
@@ -3698,27 +3373,31 @@ def alns_minimize(
                 )
 
             else:
+                # 防御：未知 name
                 remove_frac = rng.uniform(0.15, 0.35)
                 removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed)
 
             removed_set = set(int(x) for x in (removed_order or [])) if removed_order else set()
+            # ✅ 强制修复：把当前解里缺失的任务也加入本轮 repair
             missing = _missing_tasks_in_routes(cur.routes, evaluator)
             if missing:
                 miss_list = sorted((int(x) for x in missing), key=_ws_rank_local)
+                # ordered destroy 要保留 seed-first 的语义，所以只追加
                 if removed_order is None:
                     removed_order = []
                 for x in miss_list:
                     if int(x) not in removed_set:
                         removed_order.append(int(x))
                         removed_set.add(int(x))
-
             if not removed_set:
+                # 极端兜底
                 remove_frac = rng.uniform(0.15, 0.35)
                 removed_set, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed_set)
                 removed_set = set(int(x) for x in removed_order)
 
+            # --------- 3) 选 repair（有些 destroy 必须 ordered）---------
             if dname in ordered_required:
                 cand_repair = ["repair_ordered"]
             else:
@@ -3726,6 +3405,7 @@ def alns_minimize(
 
             rname = repair_pool.pick(rng, cand_repair)
 
+            # --------- 4) 执行 repair ---------
             if rname == "repair_ordered":
                 routes_new_, place_new_ = repair_greedy_insert_with_place_ordered(
                     routes=routes_half,
@@ -3743,12 +3423,8 @@ def alns_minimize(
                     force_all_shelves=force_all_shelves,
                     max_agv_candidates=max_agv_candidates,
                     max_pos_per_route=max_pos_per_route,
-                    extra_pos_samples=extra_pos_samples_base,
                     max_evals_per_task=repair_evals_per_task,
                     max_evals_total=repair_evals_total,
-                    preselect_m=preselect_m_it,
-                    preselect_per_pos_shelves=per_pos_it,
-                    shelf_cand_cap_total=cap_total_it,
                 )
             else:
                 routes_new_, place_new_ = repair_greedy_insert_with_place(
@@ -3767,79 +3443,175 @@ def alns_minimize(
                     force_all_shelves=force_all_shelves,
                     max_agv_candidates=max_agv_candidates,
                     max_pos_per_route=max_pos_per_route,
-                    extra_pos_samples=extra_pos_samples_base,
                     max_evals_per_task=repair_evals_per_task,
                     max_evals_total=repair_evals_total,
-                    preselect_m=preselect_m_it,
-                    preselect_per_pos_shelves=per_pos_it,
-                    shelf_cand_cap_total=cap_total_it,
                 )
 
             return routes_new_, place_new_, dname, rname
 
+        # ========== 执行自适应 destroy+repair ==========
         routes_new, place_new, chosen_destroy, chosen_repair = _adaptive_destroy_repair()
 
+        # strong_shake 的“重置 + 回温窗口”仍保留
         if strong_shake:
             stall = 0
             post_shake = int(POST_SHAKE_ITERS)
 
+
         # =====================================================
-        # Gate：safe evaluate + safe key 决定 heavy local
         # =====================================================
+        #  Gate：先快评估一次，决定是否值得做 heavy local search
+        # =====================================================
+        # =====================================================
+        #  Gate：先快评估一次，决定是否值得做 heavy local search
+        # =====================================================
+        # =====================================================
+        #  Gate：先评估一次（同时拿到 details），决定是否做 heavy local search
+        # =====================================================
+        routes_new = _normalize_ws_blocks(routes_new, evaluator)
+
+        # 默认：不做任何 heavy local，直接用 destroy+repair 的结果参与 SA
         shelf_seq_new = cur.shelf_seq
-        shelf_seq_changed_this_iter = False
-        routes_new = _normalize_for_eval(
-            routes_new,
-            evaluator=evaluator,
-            shelf_seq=shelf_seq_new,
-            task_shelf_mapping=task_shelf_mapping,
-            do_route_shelf_sync=_should_sync_route_shelf(it, shelf_seq_changed_this_iter),
-        )
 
-        cand_obj_fast, cand_details_fast = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
+        # ✅ v(由routes隐含) 与 shelf_seq 一致性兜底：只动 routes，不动 ws_fixed_seq
+        routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
+
+        cand_obj_fast, cand_details_fast = evaluator.evaluate(routes_new, shelf_seq_new, place_new)
+
+        cand_obj_fast = float(cand_obj_fast)
         cand_details_fast = dict(cand_details_fast) if isinstance(cand_details_fast, dict) else {}
-        cand_key_fast = _safe_infeas_key(cand_obj_fast, cand_details_fast, evaluator)
 
-        infeasible_cur = (cur_key != (0, 0, 0)) or (not math.isfinite(float(cur_obj)))
-
-        improve_feas = (cand_key_fast < cur_key)
-
-        improve_obj = False
-        if cand_key_fast == cur_key and math.isfinite(float(cand_obj_fast)) and math.isfinite(float(cur_obj)):
-            improve_obj = (float(cand_obj_fast) < float(cur_obj) - 1e-9)
+        delta0 = cand_obj_fast - float(cur_obj)
 
         p_min = 0.05
-        gate_delta = -math.log(p_min) * float(T)
+        gate_delta = -math.log(p_min) * float(T)  # ≈ 3*T
 
-        soft_ok = False
-        if cand_key_fast == cur_key and math.isfinite(float(cand_obj_fast)) and math.isfinite(float(cur_obj)):
-            soft_ok = ((float(cand_obj_fast) - float(cur_obj)) <= gate_delta)
+        # ✅ 关键：当前不可行时，别让 Gate 把修复动作跳过
+        infeasible_cur = (cur_key != (0, 0, 0))
 
-        if not enable_gate:
-            do_heavy_local = True
-        else:
-            do_heavy_local = bool(
-                strong_shake or stagnating or post_mode
-                or infeasible_cur
-                or improve_feas
-                or improve_obj
-                or soft_ok
-            )
+        do_heavy_local = bool(strong_shake or stagnating or post_mode or infeasible_cur or (delta0 <= gate_delta))
 
+        # cand_obj / cand_details 先用 fast 的；若做 heavy local，后面会覆盖
         cand_obj = float(cand_obj_fast)
         cand_details = dict(cand_details_fast)
 
+
         # =====================================================
-        # -------------- 2) 邻域搜索 --------------
+        # -------------- 2) 邻域搜索（你原来的） --------------
         # =====================================================
         if do_heavy_local:
+            if rng.random() < P_USE_CROSS_VEHICLE:
+                routes_new_cv, place_new_cv, improved_cv, _ = cross_vehicle_move_once(
+                    routes=routes_new,
+                    place=place_new,
+                    shelf_seq=cur.shelf_seq,
+                    evaluator=evaluator,
+                    S_near_by_j=S_near_by_j,
+                    task_shelf_mapping=task_shelf_mapping,
+                    shelf_init_override=shelf_init,
+                    rng=rng,
+                    try_swap=bool(stagnating or strong_shake),  # ✅ 只有停滞/强震荡才开 swap
+                    max_trials=3,
+                    max_pos_samples=8,
+                    max_s_samples=5,
+                    max_evals=10,  # ✅ 这里一定要小（8~12）
+                )
 
-            # ✅ 提速开关 1：不可行阶段只做“修复型轻动作”，别浪费在 2opt / 大跨车
-            if infeasible_cur:
-                if enable_place_tune:
+                if improved_cv:
+                    routes_new, place_new = routes_new_cv, place_new_cv
+
+            if rng.random() < P_USE_CROSS_BLOCK:
+                routes_blk, place_blk, improved_blk, _ = cross_vehicle_block_move_once(
+                    routes=routes_new,
+                    place=place_new,
+                    shelf_seq=cur.shelf_seq,
+                    evaluator=evaluator,
+                    S_near_by_j=S_near_by_j,
+                    task_shelf_mapping=task_shelf_mapping,
+                    shelf_init_override=shelf_init,
+                    rng=rng,
+                    max_block=2,
+                    max_trials=2,
+                )
+                if improved_blk:
+                    routes_new, place_new = routes_blk, place_blk
+
+            p_star = 0.25 if not stagnating else 0.65
+            trials_star = 10 if not stagnating else 40
+            if rng.random() < p_star:
+                routes_star, place_star, improved_star, _ = cross_vehicle_2opt_star_once(
+                    routes=routes_new,
+                    place=place_new,
+                    shelf_seq=cur.shelf_seq,
+                    evaluator=evaluator,
+                    rng=rng,
+                    max_trials=trials_star,
+                    allow_non_improving=bool(stagnating),
+                )
+                if (not stagnating and improved_star) or stagnating:
+                    routes_new, place_new = routes_star, place_star
+
+            if rng.random() < P_USE_INTRA_2OPT:
+                routes_new2, improved_2opt, _ = intra_two_opt_once(
+                    routes=routes_new,
+                    place=place_new,
+                    shelf_seq=cur.shelf_seq,
+                    evaluator=evaluator,
+                    rng=rng,
+                    max_trials=2,
+                )
+                if improved_2opt:
+                    routes_new = routes_new2
+
+            if rng.random() < P_USE_INTRA_OROPT:
+                routes_new3, improved_or, _ = intra_or_opt_once(
+                    routes=routes_new,
+                    place=place_new,
+                    shelf_seq=cur.shelf_seq,
+                    evaluator=evaluator,
+                    rng=rng,
+                    max_trials=2,
+                    max_block=2,
+                )
+                if improved_or:
+                    routes_new = routes_new3
+
+            if stagnating and ((it % 4) == 0):
+                routes_gap, place_gap, improved_gap, _ = intensify_close_largest_ws_gap_once(
+                    routes=routes_new,
+                    place=place_new,
+                    shelf_seq=cur.shelf_seq,
+                    evaluator=evaluator,
+                    S_near_by_j=S_near_by_j,
+                    rng=rng,
+                    task_shelf_mapping=task_shelf_mapping,
+                    shelf_init_override=shelf_init,
+                    early_pos_max=2,
+                    max_place_try_each=max_place_try_each_base,
+                    extra_random_shelves=2,
+                    force_all_shelves=False,
+                )
+                if improved_gap:
+                    routes_new, place_new = routes_gap, place_gap
+
+            # =====================================================
+            # -------------- 3) place tune / shelf tune --------------
+            # =====================================================
+            if enable_place_tune:
+                if strong_shake:
+                    do_tune = ((it % 2) == 0)
+                    global_try = 3
+                elif stagnating:
+                    do_tune = ((it % 3) == 0)
+                    global_try = 2
+                else:
+                    do_tune = ((it % 10) == 0)
+                    global_try = 0
+
+                if do_tune:
                     place_new, _ = local_place_tune_once(
                         routes=routes_new,
-                        shelf_seq=shelf_seq_new,
+                        shelf_seq=cur.shelf_seq,
                         place=place_new,
                         evaluator=evaluator,
                         S_near_by_j=S_near_by_j,
@@ -3847,216 +3619,105 @@ def alns_minimize(
                         task_shelf_mapping=task_shelf_mapping,
                         shelf_init_override=shelf_init,
                         top_k_try=5,
-                        global_try_tasks=1,
-                        max_evals=80,
-                        cap_total=40,
+                        global_try_tasks=global_try,
                     )
 
-                if enable_shelf_tune and task_shelf_mapping:
-                    shelf_seq_new, imp_promote, _ = intensify_shelf_seq_promote_critical_ws_once(
+            # 默认 shelf_seq 不变；若做 shelf_tune 再覆盖
+            shelf_seq_new = cur.shelf_seq
+
+            if enable_shelf_tune and task_shelf_mapping:
+                do_reloc = strong_shake or (stagnating and ((it % 2) == 0)) or ((it % 8) == 0)
+                if do_reloc:
+                    shelf_seq_new, _ = local_shelf_seq_relocate_once(
+                        routes=routes_new,
+                        shelf_seq=cur.shelf_seq,
+                        place=place_new,
+                        evaluator=evaluator,
+                        task_shelf_mapping=task_shelf_mapping,
+                        rng=rng,
+                    )
+
+                do_promote = strong_shake or stagnating or ((it % 12) == 0)
+                if do_promote:
+                    shelf_seq_new, _, _ = intensify_shelf_seq_promote_critical_ws_once(
                         routes=routes_new,
                         shelf_seq=shelf_seq_new,
                         place=place_new,
                         evaluator=evaluator,
                         rng=rng,
-                        max_trials=10,
+                        max_trials=14 if stagnating else 8,
                     )
-                    if imp_promote:
-                        shelf_seq_changed_this_iter = True
 
-            else:
-                if rng.random() < P_USE_CROSS_VEHICLE:
-                    routes_new_cv, place_new_cv, improved_cv, _ = cross_vehicle_move_once(
-                        routes=routes_new,
-                        place=place_new,
-                        shelf_seq=cur.shelf_seq,
-                        evaluator=evaluator,
-                        S_near_by_j=S_near_by_j,
-                        task_shelf_mapping=task_shelf_mapping,
-                        shelf_init_override=shelf_init,
-                        rng=rng,
-                        try_swap=bool(stagnating or strong_shake),
-                        max_trials=3,
-                        max_pos_samples=8,
-                        max_s_samples=5,
-                        max_evals=10,
-                    )
-                    if improved_cv:
-                        routes_new, place_new = routes_new_cv, place_new_cv
+            if (it % 15) == 0:
+                routes_int, place_int, improved_int, _ = intensify_critical_tail_once(
+                    routes=routes_new,
+                    place=place_new,
+                    shelf_seq=shelf_seq_new,
+                    evaluator=evaluator,
+                    S_near_by_j=S_near_by_j,
+                    task_shelf_mapping=task_shelf_mapping,
+                    shelf_init_override=shelf_init,
+                    tail_k=2,
+                )
+                if improved_int:
+                    routes_new, place_new = routes_int, place_int
 
-                if rng.random() < P_USE_CROSS_BLOCK:
-                    routes_blk, place_blk, improved_blk, _ = cross_vehicle_block_move_once(
-                        routes=routes_new,
-                        place=place_new,
-                        shelf_seq=cur.shelf_seq,
-                        evaluator=evaluator,
-                        S_near_by_j=S_near_by_j,
-                        task_shelf_mapping=task_shelf_mapping,
-                        shelf_init_override=shelf_init,
-                        rng=rng,
-                        max_block=2,
-                        max_trials=2,
-                    )
-                    if improved_blk:
-                        routes_new, place_new = routes_blk, place_blk
+            if (stall >= STAG_WS) and ((it % 10) == 0):
+                r_sync, s_sync, p_sync, imp_sync, _ = normalize_solution_by_ws_rank_once(
+                    routes=routes_new,
+                    shelf_seq=shelf_seq_new,
+                    place=place_new,
+                    evaluator=evaluator,
+                    S_near_by_j=S_near_by_j,
+                    rng=rng,
+                    task_shelf_mapping=task_shelf_mapping,
+                    shelf_init_override=shelf_init,
+                    global_try_tasks=2,
+                )
+                if imp_sync:
+                    routes_new, shelf_seq_new, place_new = r_sync, s_sync, p_sync
 
-                p_star = 0.25 if not stagnating else 0.65
-                trials_star = 10 if not stagnating else 40
-                if rng.random() < p_star:
-                    routes_star, place_star, improved_star, _ = cross_vehicle_2opt_star_once(
-                        routes=routes_new,
-                        place=place_new,
-                        shelf_seq=cur.shelf_seq,
-                        evaluator=evaluator,
-                        rng=rng,
-                        max_trials=trials_star,
-                        allow_non_improving=bool(stagnating),
-                    )
-                    if (not stagnating and improved_star) or stagnating:
-                        routes_new, place_new = routes_star, place_star
+            # =====================================================
+            # -------------- 4) evaluate + relabel --------------
+            # =====================================================
+            # routes_new = _normalize_ws_blocks(routes_new, evaluator)
+            # cand_obj, cand_details = evaluator.evaluate(routes_new, shelf_seq_new, place_new)
+            #
+            #
+            # cand_obj = float(cand_obj)
+            #
+            # do_relabel = (stagnating or strong_shake or ((it % 10) == 0))
+            # if do_relabel:
+            #     routes_rl, obj_rl = _relabel_best_routes(
+            #         routes_new,
+            #         evaluator=evaluator,
+            #         shelf_seq=shelf_seq_new,
+            #         place=place_new,
+            #     )
+            #     if obj_rl < float(cand_obj) - 1e-9:
+            #         routes_new = routes_rl
+            #         cand_obj = float(obj_rl)
 
-                if rng.random() < P_USE_INTRA_2OPT:
-                    routes_new2, improved_2opt, _ = intra_two_opt_once(
-                        routes=routes_new,
-                        place=place_new,
-                        shelf_seq=cur.shelf_seq,
-                        evaluator=evaluator,
-                        rng=rng,
-                        max_trials=2,
-                    )
-                    if improved_2opt:
-                        routes_new = routes_new2
-
-                if rng.random() < P_USE_INTRA_OROPT:
-                    routes_new3, improved_or, _ = intra_or_opt_once(
-                        routes=routes_new,
-                        place=place_new,
-                        shelf_seq=cur.shelf_seq,
-                        evaluator=evaluator,
-                        rng=rng,
-                        max_trials=2,
-                        max_block=2,
-                    )
-                    if improved_or:
-                        routes_new = routes_new3
-
-                if stagnating and ((it % 4) == 0):
-                    routes_gap, place_gap, improved_gap, _ = intensify_close_largest_ws_gap_once(
-                        routes=routes_new,
-                        place=place_new,
-                        shelf_seq=cur.shelf_seq,
-                        evaluator=evaluator,
-                        S_near_by_j=S_near_by_j,
-                        rng=rng,
-                        task_shelf_mapping=task_shelf_mapping,
-                        shelf_init_override=shelf_init,
-                        early_pos_max=2,
-                        max_place_try_each=max_place_try_each_base,
-                        extra_random_shelves=2,
-                        force_all_shelves=False,
-                    )
-                    if improved_gap:
-                        routes_new, place_new = routes_gap, place_gap
-
-                # -------------- 3) place tune / shelf tune --------------
-                if enable_place_tune:
-                    if strong_shake:
-                        do_tune = ((it % 2) == 0)
-                        global_try = 3
-                    elif stagnating:
-                        do_tune = ((it % 3) == 0)
-                        global_try = 2
-                    else:
-                        do_tune = ((it % 10) == 0)
-                        global_try = 0
-
-                    if do_tune:
-                        place_new, _ = local_place_tune_once(
-                            routes=routes_new,
-                            shelf_seq=cur.shelf_seq,
-                            place=place_new,
-                            evaluator=evaluator,
-                            S_near_by_j=S_near_by_j,
-                            rng=rng,
-                            task_shelf_mapping=task_shelf_mapping,
-                            shelf_init_override=shelf_init,
-                            top_k_try=5,
-                            global_try_tasks=global_try,
-                        )
-
-                shelf_seq_new = cur.shelf_seq
-
-                if enable_shelf_tune and task_shelf_mapping:
-                    do_reloc = strong_shake or (stagnating and ((it % 2) == 0)) or ((it % 8) == 0)
-                    if do_reloc:
-                        shelf_seq_new, imp_reloc = local_shelf_seq_relocate_once(
-                            routes=routes_new,
-                            shelf_seq=cur.shelf_seq,
-                            place=place_new,
-                            evaluator=evaluator,
-                            task_shelf_mapping=task_shelf_mapping,
-                            rng=rng,
-                        )
-                        if imp_reloc:
-                            shelf_seq_changed_this_iter = True
-
-                    do_promote = strong_shake or stagnating or ((it % 12) == 0)
-                    if do_promote:
-                        shelf_seq_new, imp_promote, _ = intensify_shelf_seq_promote_critical_ws_once(
-                            routes=routes_new,
-                            shelf_seq=shelf_seq_new,
-                            place=place_new,
-                            evaluator=evaluator,
-                            rng=rng,
-                            max_trials=14 if stagnating else 8,
-                        )
-                        if imp_promote:
-                            shelf_seq_changed_this_iter = True
-
-                if (it % 15) == 0:
-                    routes_int, place_int, improved_int, _ = intensify_critical_tail_once(
-                        routes=routes_new,
-                        place=place_new,
-                        shelf_seq=shelf_seq_new,
-                        evaluator=evaluator,
-                        S_near_by_j=S_near_by_j,
-                        task_shelf_mapping=task_shelf_mapping,
-                        shelf_init_override=shelf_init,
-                        tail_k=2,
-                    )
-                    if improved_int:
-                        routes_new, place_new = routes_int, place_int
-
-                if (stall >= STAG_WS) and ((it % 10) == 0):
-                    r_sync, s_sync, p_sync, imp_sync, _ = normalize_solution_by_ws_rank_once(
-                        routes=routes_new,
-                        shelf_seq=shelf_seq_new,
-                        place=place_new,
-                        evaluator=evaluator,
-                        S_near_by_j=S_near_by_j,
-                        rng=rng,
-                        task_shelf_mapping=task_shelf_mapping,
-                        shelf_init_override=shelf_init,
-                        global_try_tasks=2,
-                    )
-                    if imp_sync:
-                        routes_new, shelf_seq_new, place_new = r_sync, s_sync, p_sync
-                        shelf_seq_changed_this_iter = True
+        # （如果 do_heavy_local=False）
+        # 此时：routes_new/ place_new 来自 destroy+repair，shelf_seq_new=cur.shelf_seq，
+        # cand_obj 直接用 cand_obj_fast，马上进入 SA accept（你下面那段不需要改）
 
         # =====================================================
         # -------------- 4) evaluate + relabel --------------
         # =====================================================
+        # =====================================================
+        # -------------- 4) evaluate + relabel --------------
+        # =====================================================
         if do_heavy_local:
-            routes_new = _normalize_for_eval(
-                routes_new,
-                evaluator=evaluator,
-                shelf_seq=shelf_seq_new,
-                task_shelf_mapping=task_shelf_mapping,
-                do_route_shelf_sync=_should_sync_route_shelf(it, shelf_seq_changed_this_iter),
-            )
-            cand_obj, cand_details = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
+            # heavy local 已经改过 routes_new / shelf_seq_new / place_new，需要最终评估
+            routes_new = _normalize_ws_blocks(routes_new, evaluator)
+            routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
+            cand_obj, cand_details = evaluator.evaluate(routes_new, shelf_seq_new, place_new)
+
+            cand_obj = float(cand_obj)
             cand_details = dict(cand_details) if isinstance(cand_details, dict) else {}
         else:
+            # do_heavy_local=False：Gate 时已经 evaluate 过，直接复用 cand_obj/cand_details
             cand_obj = float(cand_obj)
             cand_details = dict(cand_details) if isinstance(cand_details, dict) else {}
 
@@ -4068,59 +3729,56 @@ def alns_minimize(
                 shelf_seq=shelf_seq_new,
                 place=place_new,
             )
-            if math.isfinite(float(obj_rl)) and (float(obj_rl) < float(cand_obj) - 1e-9):
-                routes_new = _normalize_for_eval(
-                    routes_rl,
-                    evaluator=evaluator,
-                    shelf_seq=shelf_seq_new,
-                    task_shelf_mapping=task_shelf_mapping,
-                    do_route_shelf_sync=_should_sync_route_shelf(it, shelf_seq_changed_this_iter),
-                )
-                cand_obj, cand_details = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
+            if obj_rl < float(cand_obj) - 1e-9:
+                routes_new = routes_rl
+
+                # ✅ relabel 后再兜底一次：保证 v 与 shelf_seq 一致
+                routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
+
+                # ✅ 重要：relabel 改了 routes，必须同步更新 details（否则 SA 用错 cand_key）
+                cand_obj, cand_details = evaluator.evaluate(routes_new, shelf_seq_new, place_new)
+                cand_obj = float(cand_obj)
                 cand_details = dict(cand_details) if isinstance(cand_details, dict) else {}
 
         # =====================================================
+        # -------------- 5) SA accept --------------
+        # =====================================================
+        # =====================================================
         # -------------- 5) SA accept (feasibility-first) -----
         # =====================================================
+        # =====================================================
+        # -------------- 5) SA accept (feasibility-first) -----
+        # =====================================================
+        # ✅ 关键：缓存“上一轮”的 cur/best，用于 reward 判定（避免 accept 后 cur 被覆盖）
         prev_cur_obj = float(cur_obj)
         prev_cur_key = tuple(cur_key)
         prev_best_obj = float(best_obj)
         prev_best_key = tuple(best_key)
 
-        cand_key = _safe_infeas_key(cand_obj, cand_details, evaluator)
+        cand_key = _infeas_key(cand_details, evaluator)
 
         accept = False
 
+        # 1) 不可行度变好：无条件接受（feasibility-first）
         if cand_key < prev_cur_key:
             accept = True
 
+        # 2) 不可行度一样：对 objective 用 SA
         elif cand_key == prev_cur_key:
-            if math.isfinite(float(cand_obj)) and math.isfinite(float(prev_cur_obj)):
-                if float(cand_obj) < float(prev_cur_obj) - 1e-9:
+            if cand_obj < prev_cur_obj - 1e-9:
+                accept = True
+            else:
+                delta = float(cand_obj) - float(prev_cur_obj)
+                prob = math.exp(-delta / max(1e-9, float(T)))
+                if rng.random() < prob:
                     accept = True
-                else:
-                    delta = float(cand_obj) - float(prev_cur_obj)
-                    # delta>=0 => exp(-delta/T) in (0,1]
-                    prob = math.exp(-delta / max(1e-9, float(T)))
-                    if rng.random() < prob:
-                        accept = True
-            else:
-                # 任意一边非有限：不做“同key SA”，避免 NaN/inf 污染
-                accept = False
 
+        # 3) 不可行度变差：允许少量以 infeas-SA 接受（避免卡死）
         else:
-            cur_inf = _safe_infeas_scalar(prev_cur_obj, cur_details, evaluator)
-            cand_inf = _safe_infeas_scalar(cand_obj, cand_details, evaluator)
-            delta_inf = float(cand_inf) - float(cur_inf)
-
+            delta_inf = _infeas_scalar(cand_details, evaluator) - _infeas_scalar(cur_details, evaluator)
             T_inf = max(1.0, 2.0 * float(T))
-            if delta_inf <= 0.0:
-                prob = 1.0
-            else:
-                x = -float(delta_inf) / max(1e-9, float(T_inf))
-                prob = 0.0 if x < -700.0 else math.exp(x)
-
-            if rng.random() < float(prob):
+            prob = math.exp(-float(delta_inf) / max(1e-9, float(T_inf)))
+            if rng.random() < prob:
                 accept = True
 
         if accept:
@@ -4132,7 +3790,8 @@ def alns_minimize(
             cur_details = dict(cand_details) if isinstance(cand_details, dict) else {}
             cur_key = tuple(cand_key)
 
-            if (cand_key < prev_best_key) or (cand_key == prev_best_key and float(cand_obj) < float(prev_best_obj) - 1e-9):
+            # best 更新：也要基于 prev_best（可行性优先）
+            if (cand_key < prev_best_key) or (cand_key == prev_best_key and cand_obj < prev_best_obj - 1e-9):
                 best = copy.deepcopy(cur)
                 best_obj = float(cand_obj)
                 best_key = tuple(cand_key)
@@ -4142,9 +3801,10 @@ def alns_minimize(
         # =====================================================
         # -------------- 5.5) Adaptive weight update ----------
         # =====================================================
+        # ✅ 标准 ALNS：reward 用 cand 对比 prev_cur / prev_best
         if accept:
-            is_new_best = (cand_key < prev_best_key) or (cand_key == prev_best_key and float(cand_obj) < float(prev_best_obj) - 1e-9)
-            is_improve_cur = (cand_key < prev_cur_key) or (cand_key == prev_cur_key and float(cand_obj) < float(prev_cur_obj) - 1e-9)
+            is_new_best = (cand_key < prev_best_key) or (cand_key == prev_best_key and cand_obj < prev_best_obj - 1e-9)
+            is_improve_cur = (cand_key < prev_cur_key) or (cand_key == prev_cur_key and cand_obj < prev_cur_obj - 1e-9)
 
             if is_new_best:
                 reward = SCORE_BEST
@@ -4162,7 +3822,6 @@ def alns_minimize(
 
         destroy_pool.maybe_update(it)
         repair_pool.maybe_update(it)
-
         # =====================================================
         # -------------- 6) cool & stall --------------
         # =====================================================
@@ -4179,26 +3838,22 @@ def alns_minimize(
             print(
                 f"[ALNS-inner] iter {it + 1}/{iters} | cur={cur_obj:.2f} | "
                 f"best={best_obj:.2f} | stall={stall} | T={T:.4f} | post={post_shake}"
+
             )
             print(f"[ALNS-adapt] destroy top = {destroy_pool.topk(4)}")
             print(f"[ALNS-adapt] repair  top = {repair_pool.topk(2)}")
 
+
     print(f"[ALNS-inner] best_obj after SA = {best_obj:.2f}")
 
-    best.routes = _normalize_for_eval(
-        best.routes,
-        evaluator=evaluator,
-        shelf_seq=best.shelf_seq,
-        task_shelf_mapping=task_shelf_mapping,
-        do_route_shelf_sync=_should_sync_route_shelf(0, shelf_seq_changed=True),
-    )
+    best.routes = _normalize_ws_blocks(best.routes, evaluator)
     best_rl, best_rl_obj = _relabel_best_routes(
         best.routes,
         evaluator=evaluator,
         shelf_seq=best.shelf_seq,
         place=best.place,
     )
-    if math.isfinite(float(best_rl_obj)) and float(best_rl_obj) < float(best_obj) - 1e-9:
+    if best_rl_obj < float(best_obj) - 1e-9:
         best.routes = best_rl
         best_obj = float(best_rl_obj)
 
@@ -4213,22 +3868,16 @@ def alns_minimize(
             shelf_init_override=shelf_init,
             tail_k=2,
         )
-        if improved_int and math.isfinite(float(obj_int)) and float(obj_int) < float(best_obj) - 1e-9:
+        if improved_int and float(obj_int) < float(best_obj) - 1e-9:
             best.routes, best.place = routes_int, place_int
             best_obj = float(obj_int)
         else:
             break
 
     print(f"[ALNS-inner] final_best_obj = {best_obj:.2f}")
-
-    best.routes = _normalize_for_eval(
-        best.routes,
-        evaluator=evaluator,
-        shelf_seq=best.shelf_seq,
-        task_shelf_mapping=task_shelf_mapping,
-        do_route_shelf_sync=_should_sync_route_shelf(0, shelf_seq_changed=True),
-    )
-
+    # ✅ 返回前兜底：保证最终输出的 routes 与 shelf_seq 一致（不动 ws_fixed_seq）
+    best.routes = _normalize_ws_blocks(best.routes, evaluator)
+    best.routes = normalize_routes_by_shelf_seq_order(best.routes, best.shelf_seq, task_shelf_mapping)
     _ = basic_feasibility_check_level0(
         routes=best.routes,
         shelf_seq=best.shelf_seq,
@@ -4238,4 +3887,3 @@ def alns_minimize(
         verbose=True,
     )
     return best
-#n
