@@ -54,3 +54,7 @@ pythonProject5/timeline.csv
 bench_quick_*_runs.csv
 # keep baseline summaries
 !bench_baseline_*.json
+# quick-bench outputs (generated every run)
+pythonProject5/bench_quick_*_runs.csv
+pythonProject5/bench_quick_*_summary.json
+pythonProject5/bench_quick_*.log
