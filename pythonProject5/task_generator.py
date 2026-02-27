@@ -99,7 +99,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--prefix", default="demo01", help="场景前缀（scenario/<prefix>/tasks.csv）")
     ap.add_argument("--seed", type=int, default=None, help="随机种子（可复现）")
-    ap.add_argument("--num_tasks", type=int, default=40, help="任务数")
+    ap.add_argument("--num_tasks", type=int, default=100, help="任务数")
     ap.add_argument("--unique-pairs", action="store_true",
                     help="使用互异 (Shelf, Workstation) 生成（默认不互异，允许重复）")
     ap.add_argument("--dur_low", type=int, default=5, help="加工时长下界（含）")

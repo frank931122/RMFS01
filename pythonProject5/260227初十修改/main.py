@@ -18,16 +18,7 @@ from time_manager import TimeManager
 from scenario import build_scenario_from_prefix, print_scenario_brief
 from utils import distance
 from evaluator import RobustEvaluator
-from alns_min import (
-    alns_minimize,
-    build_feasible_initial_solution,
-    build_full_coverage_seed,
-    build_ws_round_robin_seed,
-    build_exact_feasible_seed,
-    build_safe_chain_ws_seed,
-    repair_shelf_seq_by_chain_violations,
-    repair_chain_violations_by_route_relink,
-)
+from alns_min import alns_minimize
 from export_eval_diag import export_evaluator_diagnostics
 import sys
 import subprocess
@@ -59,66 +50,6 @@ class EvalProfiler:
     def report(self, tag: str = "[Profiler]"):
         avg_ms = (self.total_sec / max(1, self.calls)) * 1000.0
         print(f"{tag} evaluate calls={self.calls} | total={self.total_sec:.3f}s | avg={avg_ms:.3f}ms")
-
-
-def build_fixed_shelf_seq_from_ws(
-    *,
-    task_shelf_mapping: Dict[int, object],
-    ws_fixed_seq: Dict[int, List[int]],
-    shelf_ids: List[int],
-    tasks: Set[int],
-) -> Dict[int, List[int]]:
-    """
-    Build a deterministic shelf order from:
-      - task->shelf mapping
-      - global ws fixed order
-    Missing tasks are appended by task id within their shelf chain.
-    """
-    out: Dict[int, List[int]] = {int(c): [] for c in shelf_ids}
-    seen: Set[int] = set()
-    task_set = set(int(j) for j in tasks)
-
-    def _safe_chain(j: int) -> Optional[int]:
-        v = task_shelf_mapping.get(int(j), None)
-        try:
-            if v is None:
-                return None
-            return int(v)
-        except Exception:
-            return None
-
-    for ws in sorted(int(w) for w in ws_fixed_seq.keys()):
-        for j_raw in (ws_fixed_seq.get(int(ws), []) or []):
-            j = int(j_raw)
-            if (j in seen) or (j not in task_set):
-                continue
-            c = _safe_chain(j)
-            if c is None:
-                continue
-            if int(c) not in out:
-                out[int(c)] = []
-            out[int(c)].append(int(j))
-            seen.add(int(j))
-
-    for j in sorted(task_set):
-        if j in seen:
-            continue
-        c = _safe_chain(j)
-        if c is None:
-            continue
-        if int(c) not in out:
-            out[int(c)] = []
-        out[int(c)].append(int(j))
-        seen.add(int(j))
-
-    return out
-
-
-def force_solution_shelf_seq(sol: InitialSolution, fixed_shelf_seq: Dict[int, List[int]]) -> InitialSolution:
-    sol.shelf_seq = {int(c): [int(x) for x in seq] for c, seq in (fixed_shelf_seq or {}).items()}
-    return sol
-
-
 def print_solution_full_from_diag(
     *,
     title: str,
@@ -1646,11 +1577,6 @@ def main():
         action="store_true",
         help="严格从头求解：不读取任何历史可行种子（cache/bridge）。",
     )
-    ap.add_argument(
-        "--shelf-seq-intermediate",
-        action="store_true",
-        help="实验开关：将 shelf_seq 视为中间变量并固定，不作为 ALNS 可搜索变量。",
-    )
 
     ap.add_argument(
         "--cross-gamma-check",
@@ -1767,20 +1693,6 @@ def main():
         pi=pi
     )
 
-    # Experiment mode (opt-in): treat shelf_seq as an intermediate fixed variable.
-    shelf_seq_intermediate_mode = bool(getattr(args, "shelf_seq_intermediate", False))
-    fixed_shelf_seq: Dict[int, List[int]] = {}
-    if shelf_seq_intermediate_mode:
-        fixed_shelf_seq = build_fixed_shelf_seq_from_ws(
-            task_shelf_mapping=task_shelf_mapping,
-            ws_fixed_seq=ws_fixed_seq,
-            shelf_ids=shelf_ids,
-            tasks=J,
-        )
-        init_sol = force_solution_shelf_seq(init_sol, fixed_shelf_seq)
-    if shelf_seq_intermediate_mode:
-        print("[ALNS] shelf_seq-as-intermediate mode ON: fixed derived shelf order (ws + task->shelf).")
-
     # 距离与 Δ（给评估器）
     d_s_pi, d_pi_s, d_s_s = {}, {}, {}
     for s in S:
@@ -1799,8 +1711,6 @@ def main():
     # 每个任务的“工位最近前 m 个储位”（ALNS 用它来枚举 x）
     m = 8
     S_near_by_j = {j: sorted(S, key=lambda s: d_pi_s[(j, s)])[:min(m, len(S))] for j in J}
-    chain_repair_iters_hard = max(24, min(160, 2 * len(J)))
-    cell_repair_iters_hard = max(16, min(80, len(J)))
 
     check_v_consistency(
         routes=init_sol.routes, shelf_seq=init_sol.shelf_seq, place=init_sol.place,
@@ -1829,9 +1739,9 @@ def main():
             envelope_shared_resources=True,
 
             enable_chain_repair=True,
-            chain_repair_max_iters=chain_repair_iters_hard,
+            chain_repair_max_iters=8,
             enable_cell_repair=True,
-            cell_repair_max_iters=cell_repair_iters_hard,
+            cell_repair_max_iters=15,
 
             cell_conflict_mode="hard",
             allow_incomplete=False,
@@ -1897,21 +1807,34 @@ def main():
     # 逐 γ 求解
     # 逐 γ 求解（只跑 ALNS）
     prev_best_sol: InitialSolution | None = None
+    def _load_initial_solution_from_bundle_path(bundle_path: Path) -> InitialSolution | None:
+        try:
+            if (not bundle_path.exists()) or (not bundle_path.is_file()):
+                return None
+            with open(bundle_path, "r", encoding="utf-8") as f:
+                b = json.load(f)
+            if not isinstance(b, dict):
+                return None
+            routes_raw = b.get("routes", {}) or {}
+            shelf_raw = b.get("shelf_seq", {}) or {}
+            place_raw = b.get("place", {}) or {}
+            if (not routes_raw) or (not shelf_raw) or (not place_raw):
+                return None
+            return InitialSolution(
+                routes={int(r): [int(x) for x in seq] for r, seq in routes_raw.items()},
+                shelf_seq={int(c): [int(x) for x in seq] for c, seq in shelf_raw.items()},
+                place={int(j): int(s) for j, s in place_raw.items()},
+            )
+        except Exception:
+            return None
+
     for g in gamma_list:
         print("\n" + "=" * 70)
         print(f"[RUN] 开始 ALNS：γ = {g}")
         print("=" * 70)
 
         need_full_diag = bool(args.export_eval_diag or args.verbose)
-        requested_profile = str(getattr(args, "alns_speed_profile", "balanced") or "balanced").strip().lower()
-        no_seed_cli = bool(getattr(args, "alns_no_seed", False))
-        no_seed = True
-        if (not no_seed_cli):
-            print("[ALNS] history seed loading disabled globally: force no-seed recomputation mode.")
-        run_profile = "balanced" if no_seed else requested_profile
-        fast_post_mode = (run_profile == "turbo")
-        if no_seed and requested_profile == "turbo":
-            print("[ALNS] no-seed mode: force balanced profile for from-scratch feasibility.")
+        fast_post_mode = str(getattr(args, "alns_speed_profile", "balanced") or "balanced").strip().lower() == "turbo"
 
         # ========= Fast evaluator（给 ALNS 内层用）=========
         # ========= Fast evaluator（给 ALNS 内层用）=========
@@ -1952,36 +1875,6 @@ def main():
             init_lock_verbose=False,
         )
 
-        # ========= Hard-partial evaluator (for feasibility-driven construction) =========
-        evaluator_hard_partial = RobustEvaluator(
-            J=J, R=R, S=S,
-            pi=pi,
-            D={j: tasks[j][1] for j in J},
-            J0=J0, Jd=Jd, J_I=J_I,
-            shelf_data=shelf_data, agv_data=agv_data,
-            d_s_pi=d_s_pi, d_pi_s=d_pi_s, d_s_s=d_s_s,
-            Delta_s_pi=Delta_s_pi, Delta_pi_s=Delta_pi_s, Delta_s_s=Delta_s_s,
-            gamma=g,
-            ws_fixed_seq=ws_fixed_seq,
-            ws_setup_rule="flat",
-            lock_place=True,
-            detach_on_mismatch=False,
-            envelope_shared_resources=True,
-            enable_chain_repair=True,
-            chain_repair_max_iters=chain_repair_iters_hard,
-            enable_cell_repair=True,
-            cell_repair_max_iters=cell_repair_iters_hard,
-            cell_conflict_mode="hard",
-            allow_incomplete=True,
-            timeline_mode="off",
-            collect_v_arcs=False,
-            record_cell_repair_log=False,
-            enable_init_cell_lock=True,
-            init_lock_max_iters=INIT_LOCK_ITERS_ALIGN,
-            init_lock_tol=INIT_LOCK_TOL,
-            init_lock_verbose=False,
-        )
-
         # ========= Exact evaluator（ALNS 结束后核验/导出用）=========
         evaluator_exact = RobustEvaluator(
             J=J, R=R, S=S,
@@ -2000,9 +1893,9 @@ def main():
 
             # --- Exact：允许修复（对齐 MILP / cross-gamma 可比） ---
             enable_chain_repair=True,
-            chain_repair_max_iters=chain_repair_iters_hard,
+            chain_repair_max_iters=8,
             enable_cell_repair=True,
-            cell_repair_max_iters=cell_repair_iters_hard,
+            cell_repair_max_iters=15,
 
             cell_conflict_mode="hard",
             allow_incomplete=False,
@@ -2019,116 +1912,39 @@ def main():
 
         shelf_init_for_alns = {int(c): int(pos) for c, pos in shelf_data.items()}
         cache_bundle_path = Path("solution_exports") / f"{prefix}_alns_bundle_cache_gamma{int(g)}.json"
-        allow_history_seed_io = False
-        # Keep the no_seed policy decided above (forced true for pure recomputation).
-        no_seed = bool(no_seed)
-        # Hard policy: do not read any historical feasible seed.
+        bridge_bundle_path = Path("solution_exports") / f"{prefix}_bridge_milpG{int(g)}_bundle_gamma{int(g)}.json"
+        no_seed = bool(getattr(args, "alns_no_seed", False))
+        use_cache = (not no_seed) and (not bool(getattr(args, "alns_ignore_cache", False)))
+        seed_paths: list[Path] = [] if no_seed else (([cache_bundle_path] if use_cache else []) + [bridge_bundle_path])
         feasible_seed: InitialSolution | None = None
-
-        forced_seed: InitialSolution | None = None
-        forced_seed_ms: float = float("inf")
-        if no_seed:
-            seed_base = init_sol
-            print("[ALNS] no-seed mode: building exact feasible initial seed (no history).")
-            forced_seed = build_full_coverage_seed(
-                seed_base,
-                evaluator=evaluator_hard_partial,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init=shelf_init_for_alns,
-                seed=int(args.seed),
-            )
-            forced_seed_ms, _ = evaluator_exact.evaluate(
-                forced_seed.routes, forced_seed.shelf_seq, forced_seed.place
-            )
-            if math.isfinite(float(forced_seed_ms)):
-                print(f"[ALNS] no-seed full-coverage seed ready | cmax={float(forced_seed_ms):.2f}")
-            if not math.isfinite(float(forced_seed_ms)):
-                print("[ALNS] no-seed deterministic ws-round-robin exact seed.")
-                rr_seed = build_ws_round_robin_seed(
-                    forced_seed,
-                    evaluator=evaluator_exact,
-                    task_shelf_mapping=task_shelf_mapping,
-                )
-                rr_ms, _ = evaluator_exact.evaluate(
-                    rr_seed.routes, rr_seed.shelf_seq, rr_seed.place
-                )
-                if math.isfinite(float(rr_ms)):
-                    forced_seed = rr_seed
-                    forced_seed_ms = float(rr_ms)
-                    print(f"[ALNS] ws-round-robin exact seed ready | cmax={float(forced_seed_ms):.2f}")
-            if not math.isfinite(float(forced_seed_ms)):
-                print("[ALNS] no-seed exact-constructor: strict exact-feasibility driven insertion.")
-                constructor_attempts = 24 if int(g) == 0 else 4
-                constructor_time_budget = 90.0 if int(g) == 0 else 14.0
-                constructor_eval_budget = 8000 if int(g) == 0 else 3000
-                forced_seed = build_exact_feasible_seed(
-                    forced_seed,
-                    evaluator_partial_hard=evaluator_hard_partial,
-                    evaluator_exact=evaluator_exact,
-                    S_near_by_j=S_near_by_j,
-                    task_shelf_mapping=task_shelf_mapping,
-                    shelf_init=shelf_init_for_alns,
-                    seed=int(args.seed),
-                    attempts=constructor_attempts,
-                    time_budget_sec=constructor_time_budget,
-                    per_attempt_eval_budget=constructor_eval_budget,
-                )
-                forced_seed_ms, _ = evaluator_exact.evaluate(
-                    forced_seed.routes, forced_seed.shelf_seq, forced_seed.place
-                )
-                if math.isfinite(float(forced_seed_ms)):
-                    print(f"[ALNS] no-seed exact-constructor succeeded | cmax={float(forced_seed_ms):.2f}")
-            if not math.isfinite(float(forced_seed_ms)):
-                print("[ALNS] no-seed seed repair: run short exact ALNS from full-coverage seed.")
-                seed_repair_eval = evaluator_hard_partial if int(g) == 0 else evaluator_exact
-                prof_seed = EvalProfiler(seed_repair_eval)
-                forced_seed = alns_minimize(
-                    init=forced_seed,
-                    evaluator=prof_seed,
-                    iters=(520 if int(g) == 0 else 260),
-                    start_T=1.1,
-                    cool=0.997,
-                    S_near_by_j=S_near_by_j,
-                    seed=int(args.seed) + 104729,
-                    task_shelf_mapping=task_shelf_mapping,
-                    enable_place_tune=True,
-                    enable_shelf_tune=True,
-                    shelf_init=shelf_init_for_alns,
-                    feasible_first=False,
-                    enable_strong_init=False,
-                    speed_profile="balanced",
-                    time_budget_sec=(25.0 if int(g) == 0 else 10.0),
-                    relabel_interval=0,
-                    eval_budget_total=(22000 if int(g) == 0 else 9000),
-                    eval_budget_heavy=(13000 if int(g) == 0 else 5000),
-                    target_feasible_obj=1000.0,
-                )
-                prof_seed.report(tag=f"[SeedRepair γ={g}]")
-                forced_seed_ms, _ = evaluator_exact.evaluate(
-                    forced_seed.routes, forced_seed.shelf_seq, forced_seed.place
-                )
-                if math.isfinite(float(forced_seed_ms)):
-                    print(f"[ALNS] no-seed exact feasible seed ready after repair | cmax={float(forced_seed_ms):.2f}")
-            if not math.isfinite(float(forced_seed_ms)):
-                print("[ALNS] warning: exact feasible seed not found yet; ALNS will continue from best-available structure.")
+        if fast_post_mode:
+            for pth in seed_paths:
+                cand = _load_initial_solution_from_bundle_path(pth)
+                if cand is None:
+                    continue
+                try:
+                    ms_seed, _ = evaluator_exact.evaluate(cand.routes, cand.shelf_seq, cand.place)
+                except Exception:
+                    continue
+                if math.isfinite(float(ms_seed)):
+                    feasible_seed = cand
+                    print(f"[ALNS] turbo feasible seed loaded: {pth} | cmax={float(ms_seed):.2f}")
+                    break
 
         # ========= 调用 ALNS（Profiler 包 fast evaluator）=========
-        total_budget = float(getattr(args, "alns_time_budget_sec", 0.0) or 0.0)
-        if no_seed:
-            total_budget = 0.0
         if args.alns_iters and args.alns_iters > 0:
-            search_evaluator = evaluator_fast
-            if no_seed and int(g) == 0:
-                search_evaluator = evaluator_hard_partial
-            prof = EvalProfiler(search_evaluator)
+            prof = EvalProfiler(evaluator_fast)
             print(f"[ALNS] Start: iters={args.alns_iters}, gamma={g}")
-            if forced_seed is not None:
-                init_for_alns = forced_seed
+            if feasible_seed is not None:
+                init_for_alns = feasible_seed
             else:
-                init_for_alns = init_sol
+                init_for_alns = prev_best_sol if prev_best_sol is not None else init_sol
+            total_budget = float(getattr(args, "alns_time_budget_sec", 0.0) or 0.0)
             if total_budget <= 0.0:
-                budget_stage1 = (30.0 if no_seed else None)
+                budget_stage1 = None
+                budget_stage2 = 0.0
+            elif fast_post_mode and feasible_seed is not None:
+                budget_stage1 = min(2.0, total_budget)
                 budget_stage2 = 0.0
             elif fast_post_mode and total_budget > 6.0:
                 budget_stage2 = 4.0
@@ -2137,31 +1953,10 @@ def main():
                 budget_stage1 = total_budget
                 budget_stage2 = 0.0
 
-            stage1_eval_budget_total = None
-            stage1_eval_budget_heavy = None
-            stage1_target_obj = None
-            if no_seed:
-                stage1_eval_budget_total = 42000
-                stage1_eval_budget_heavy = 25000
-                # For long-run experiments, do not early-stop just because the seed is feasible.
-                # Keep the <=1000 shortcut only for short iterations.
-                if int(g) == 0:
-                    stage1_target_obj = 1000.0 if int(args.alns_iters) <= 300 else None
-                else:
-                    stage1_target_obj = 1000.0
-
             init_sol_best = alns_minimize(
                 init=init_for_alns,
                 evaluator=prof,
-                iters=(
-                    (
-                        int(args.alns_iters)
-                        if (no_seed and int(g) == 0 and int(args.alns_iters) > 300)
-                        else min(int(args.alns_iters), 80)
-                    )
-                    if ((forced_seed is not None) and math.isfinite(float(forced_seed_ms)))
-                    else (min(int(args.alns_iters), 320) if no_seed else args.alns_iters)
-                ),
+                iters=(min(int(args.alns_iters), 80) if feasible_seed is not None else args.alns_iters),
                 start_T=1.0, cool=0.995,
                 S_near_by_j=S_near_by_j,
                 seed=args.seed,
@@ -2169,14 +1964,8 @@ def main():
                 enable_place_tune=True,
                 enable_shelf_tune=True,
                 shelf_init=shelf_init_for_alns,
-                speed_profile=str(run_profile),
+                speed_profile=str(getattr(args, "alns_speed_profile", "balanced") or "balanced"),
                 time_budget_sec=budget_stage1,
-                enable_strong_init=True,
-                strong_init_tries=(6 if no_seed else 4),
-                strong_init_time_budget_sec=(12.0 if no_seed else 0.0),
-                eval_budget_total=stage1_eval_budget_total,
-                eval_budget_heavy=stage1_eval_budget_heavy,
-                target_feasible_obj=stage1_target_obj,
             )
 
             print(f"[ALNS] Done: best structure found for γ={g}.")
@@ -2226,147 +2015,28 @@ def main():
                     init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
                 )
 
-        if (not math.isfinite(float(best_ms))) and no_seed:
-            extra_budget = max(130.0, (float(total_budget) * 5.0 if float(total_budget) > 0.0 else 0.0))
-            init_emg = init_sol_best
-            print(f"[ALNS] no-seed emergency fallback: balanced/exact solve ({extra_budget:.1f}s)")
-            seed_try = [int(args.seed) + 17, int(args.seed) + 7919, int(args.seed)]
-            remaining_budget = float(extra_budget)
-            for idx, s_try in enumerate(seed_try):
-                left = max(1, len(seed_try) - idx)
-                per_try_budget = max(25.0, remaining_budget / float(left))
-                per_try_budget = min(per_try_budget, remaining_budget)
-                emergency_evaluator = evaluator_hard_partial if int(g) == 0 else evaluator_fast
-                prof_emg = EvalProfiler(emergency_evaluator)
-                init_sol_try = alns_minimize(
-                    init=init_emg,
-                    evaluator=prof_emg,
-                    iters=max(800, int(args.alns_iters)),
-                    start_T=1.0,
-                    cool=0.996,
-                    S_near_by_j=S_near_by_j,
-                    seed=int(s_try),
-                    task_shelf_mapping=task_shelf_mapping,
-                    enable_place_tune=True,
-                    enable_shelf_tune=True,
-                    shelf_init=shelf_init_for_alns,
-                    speed_profile="balanced",
-                    time_budget_sec=float(per_try_budget),
-                    relabel_interval=24,
-                    eval_budget_total=56000,
-                    eval_budget_heavy=33000,
-                    target_feasible_obj=580.0,
-                )
-                prof_emg.report(tag=f"[Emergency γ={g} seed={s_try}]")
-                ms_try, diag_try = evaluator_exact.evaluate(
-                    init_sol_try.routes, init_sol_try.shelf_seq, init_sol_try.place
-                )
-                if math.isfinite(float(ms_try)):
-                    init_sol_best = init_sol_try
-                    best_ms, best_diag = float(ms_try), diag_try
-                    print(f"[ALNS] no-seed emergency succeeded with seed={s_try} | cmax={best_ms:.2f}")
+        if not math.isfinite(float(best_ms)):
+            for pth in seed_paths:
+                cand = _load_initial_solution_from_bundle_path(pth)
+                if cand is None:
+                    continue
+                try:
+                    ms_c, diag_c = evaluator_exact.evaluate(cand.routes, cand.shelf_seq, cand.place)
+                except Exception:
+                    continue
+                if math.isfinite(float(ms_c)):
+                    init_sol_best = cand
+                    best_ms, best_diag = float(ms_c), diag_c
+                    print(f"[ALNS] fallback to feasible seed: {pth} | cmax={best_ms:.2f}")
                     break
-                remaining_budget = max(0.0, remaining_budget - float(per_try_budget))
-
-        if (not math.isfinite(float(best_ms))) and no_seed and int(g) != 0:
-            print("[ALNS] no-seed deterministic fallback: single-AGV topo safe seed.")
-            safe_seed = build_safe_chain_ws_seed(
-                init_sol_best,
-                evaluator_exact=evaluator_exact,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init=shelf_init_for_alns,
-                seed=int(args.seed) + 424242,
-                tries=(120 if int(g) == 0 else 80),
-            )
-            ms_safe, diag_safe = evaluator_exact.evaluate(
-                safe_seed.routes, safe_seed.shelf_seq, safe_seed.place
-            )
-            if math.isfinite(float(ms_safe)):
-                init_sol_best = safe_seed
-                best_ms, best_diag = float(ms_safe), diag_safe
-                print(f"[ALNS] deterministic fallback succeeded | cmax={best_ms:.2f}")
-            else:
-                init_sol_best = safe_seed
-
-        if (not math.isfinite(float(best_ms))) and no_seed:
-            print("[ALNS] no-seed chain-violation shelf-seq repair fallback.")
-            repaired_seed = repair_shelf_seq_by_chain_violations(
-                init_sol_best,
-                evaluator_exact=evaluator_exact,
-                task_shelf_mapping=task_shelf_mapping,
-                max_steps=(160 if int(g) == 0 else 80),
-            )
-            ms_rep, diag_rep = evaluator_exact.evaluate(
-                repaired_seed.routes, repaired_seed.shelf_seq, repaired_seed.place
-            )
-            if math.isfinite(float(ms_rep)):
-                init_sol_best = repaired_seed
-                best_ms, best_diag = float(ms_rep), diag_rep
-                print(f"[ALNS] chain-violation repair fallback succeeded | cmax={best_ms:.2f}")
-
-        if (not math.isfinite(float(best_ms))) and no_seed:
-            print("[ALNS] no-seed chain-violation route relink fallback.")
-            relink_seed = repair_chain_violations_by_route_relink(
-                init_sol_best,
-                evaluator_exact=evaluator_exact,
-                task_shelf_mapping=task_shelf_mapping,
-                max_steps=(120 if int(g) == 0 else 100),
-            )
-            ms_relink, diag_relink = evaluator_exact.evaluate(
-                relink_seed.routes, relink_seed.shelf_seq, relink_seed.place
-            )
-            init_sol_best = relink_seed
-            if math.isfinite(float(ms_relink)):
-                best_ms, best_diag = float(ms_relink), diag_relink
-                print(f"[ALNS] route relink fallback succeeded | cmax={best_ms:.2f}")
-
-        if no_seed and math.isfinite(float(best_ms)):
-            if int(g) == 0 and float(best_ms) <= 500.0 and int(args.alns_iters) <= 300:
-                print("[ALNS] no-seed polish skipped: strong exact seed already found.")
-            else:
-                print("[ALNS] no-seed polish stage: short fast ALNS refinement.")
-                polish_evaluator = evaluator_hard_partial if int(g) == 0 else evaluator_fast
-                prof_polish = EvalProfiler(polish_evaluator)
-                polish_sol = alns_minimize(
-                    init=init_sol_best,
-                    evaluator=prof_polish,
-                    iters=min(320, max(120, int(args.alns_iters) // 2)),
-                    start_T=0.9,
-                    cool=0.997,
-                    S_near_by_j=S_near_by_j,
-                    seed=int(args.seed) + 271828,
-                    task_shelf_mapping=task_shelf_mapping,
-                    enable_place_tune=True,
-                    enable_shelf_tune=True,
-                    shelf_init=shelf_init_for_alns,
-                    speed_profile="balanced",
-                    time_budget_sec=35.0,
-                    relabel_interval=20,
-                    enable_strong_init=False,
-                    feasible_first=False,
-                    eval_budget_total=42000,
-                    eval_budget_heavy=26000,
-                )
-                prof_polish.report(tag=f"[Polish γ={g}]")
-                ms_polish, diag_polish = evaluator_exact.evaluate(
-                    polish_sol.routes, polish_sol.shelf_seq, polish_sol.place
-                )
-                if math.isfinite(float(ms_polish)) and float(ms_polish) < float(best_ms) - 1e-9:
-                    init_sol_best = polish_sol
-                    best_ms, best_diag = float(ms_polish), diag_polish
-                    print(f"[ALNS] no-seed polish improved cmax -> {best_ms:.2f}")
 
         if not math.isfinite(float(best_ms)):
-            # Historical-seed fallback is disabled by design.
-            pass
-
-        if not math.isfinite(float(best_ms)):
-            # Keep the best-found structure from no-seed repair chain for diagnostics/export.
-            # Do not overwrite it with the raw heuristic init.
-            best_ms, best_diag = evaluator_exact.evaluate(
-                init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
+            init_sol_best = InitialSolution(
+                routes={int(r): [int(x) for x in seq] for r, seq in init_sol.routes.items()},
+                shelf_seq={int(c): [int(x) for x in seq] for c, seq in init_sol.shelf_seq.items()},
+                place={int(j): int(s) for j, s in init_sol.place.items()},
             )
+            best_ms, best_diag = float(base_ms), {}
         print(f"[ALNS] Exact makespan: base={base_ms:.2f} → best={best_ms:.2f} (Δ={base_ms - best_ms:+.2f})")
 
         if args.verbose:
@@ -2437,7 +2107,7 @@ def main():
 
         alns_bundles_by_gamma[int(g)] = load_bundle_json(alns_path)
         print(f"[ALNS] saved bundle -> {alns_path}")
-        if allow_history_seed_io and math.isfinite(float(ms_final)):
+        if math.isfinite(float(ms_final)):
             try:
                 with open(cache_bundle_path, "w", encoding="utf-8") as f:
                     json.dump(alns_bundles_by_gamma[int(g)], f, ensure_ascii=False, indent=2)
