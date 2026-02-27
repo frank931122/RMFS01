@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import math
@@ -23,16 +23,16 @@ def basic_feasibility_check_level0(
     verbose: bool = True,
 ) -> bool:
     """
-    ???????????????????????????????????????????????????MILP ?????????
-      1) ?????????????????????routes ????????????????????????
-      2) ???????????? route ???????????????????????? / ????????????
-      3) shelf_seq ?????????task_shelf_mapping ?????????????????????
-      4) place ??????????????????????????????cell
+    第0层：只检查最基础的结构可行性（与 MILP 无关）
+      1) 每个任务是否被 routes 覆盖一次且仅一次
+      2) 每辆车的 route 是否不含非法任务 / 重复任务
+      3) shelf_seq 是否与 task_shelf_mapping 一致（若提供）
+      4) place 是否只使用合法的货架cell
     """
     ok = True
     all_tasks: Set[int] = set(int(j) for j in evaluator.J)
 
-    # 1) routes ????????????
+    # 1) routes 覆盖计数
     appear_cnt: Dict[int, int] = {j: 0 for j in all_tasks}
     for r, seq in routes.items():
         for j in seq:
@@ -40,7 +40,7 @@ def basic_feasibility_check_level0(
             if jj not in all_tasks:
                 ok = False
                 if verbose:
-                    print(f"[Lv0-Check] ERROR: AGV {r} route ?????????????????????{jj}")
+                    print(f"[Lv0-Check] ERROR: AGV {r} route 中出现非法任务 {jj}")
             else:
                 appear_cnt[jj] += 1
 
@@ -48,13 +48,13 @@ def basic_feasibility_check_level0(
         if appear_cnt[j] == 0:
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: task {j} does not appear in any AGV route")
+                print(f"[Lv0-Check] ERROR: 任务 {j} 没有出现在任何 AGV route 中")
         elif appear_cnt[j] > 1:
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: ?????? {j} ???routes ???????????? {appear_cnt[j]} ???(>1)")
+                print(f"[Lv0-Check] ERROR: 任务 {j} 在 routes 中出现了 {appear_cnt[j]} 次 (>1)")
 
-    # 2) ????????????
+    # 2) 车内重复
     for r, seq in routes.items():
         seen: Set[int] = set()
         for j in seq:
@@ -62,10 +62,10 @@ def basic_feasibility_check_level0(
             if jj in seen:
                 ok = False
                 if verbose:
-                    print(f"[Lv0-Check] ERROR: AGV {r} ???route ?????????{jj} ????????????")
+                    print(f"[Lv0-Check] ERROR: AGV {r} 的 route 中任务 {jj} 重复出现")
             seen.add(jj)
 
-    # 3) shelf_seq ???mapping ?????????
+    # 3) shelf_seq 与 mapping 一致性
     if task_shelf_mapping is not None:
         for c, seq in shelf_seq.items():
             cc = int(c)
@@ -76,8 +76,8 @@ def basic_feasibility_check_level0(
                     ok = False
                     if verbose:
                         print(
-                            f"[Lv0-Check] ERROR: shelf_seq ?????? {cc} ?????????{jj}, "
-                            f"???task_shelf_mapping[{jj}] = {c_expect}"
+                            f"[Lv0-Check] ERROR: shelf_seq 中链 {cc} 含任务 {jj}, "
+                            f"但 task_shelf_mapping[{jj}] = {c_expect}"
                         )
 
         shelf_cover: Dict[int, Set[int]] = {
@@ -91,35 +91,35 @@ def basic_feasibility_check_level0(
                 ok = False
                 if verbose:
                     print(
-                        f"[Lv0-Check] ERROR: ?????? {j} ???????????? {c_expect}, "
-                        f"???shelf_seq[{c_expect}] ????????????"
+                        f"[Lv0-Check] ERROR: 任务 {j} 期望在链 {c_expect}, "
+                        f"但 shelf_seq[{c_expect}] 中未出现"
                     )
 
-    # 4) place ?????????
+    # 4) place 合法性
     all_cells: Set[int] = set(int(s) for s in evaluator.S)
     for j, s in place.items():
         jj, ss = int(j), int(s)
         if jj not in all_tasks:
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: place ?????????????????????{jj}")
+                print(f"[Lv0-Check] ERROR: place 中出现未知任务 {jj}")
         if ss not in all_cells:
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: place[{jj}] = {ss} ??????????????????cell")
+                print(f"[Lv0-Check] ERROR: place[{jj}] = {ss} 不是合法货架cell")
 
-    # 5) place ????????????routes ?????????
+    # 5) place 覆盖所有 routes 内任务
     for j in all_tasks:
         if appear_cnt[j] > 0 and (j not in place):
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: ?????? {j} ?????????routes ?????????place ????????????????????????")
+                print(f"[Lv0-Check] ERROR: 任务 {j} 出现在 routes 中，但 place 中没有对应回库位")
 
     if verbose:
         if ok:
-            print("[Lv0-Check] ???????????????????????????routes / shelf_seq / place ??????????????????")
+            print("[Lv0-Check] 基础结构检查通过（routes / shelf_seq / place 一致性良好）")
         else:
-            print("[Lv0-Check] structural check failed; see ERROR lines above")
+            print("[Lv0-Check] 基础结构检查存在问题（见上方 ERROR）")
     return ok
 
 
@@ -145,11 +145,7 @@ def _make_fail_details(evaluator: RobustEvaluator, *, reason: str = "", base: Op
     penalties["tail_cell_conflict"] = max(float(penalties.get("tail_cell_conflict", 0.0) or 0.0), 1.0)
     penalties["cell_conflict_pairs"] = max(float(penalties.get("cell_conflict_pairs", 0.0) or 0.0), 1e9)
     penalties["cell_conflict_overlap_time"] = max(float(penalties.get("cell_conflict_overlap_time", 0.0) or 0.0), 1e9)
-    uns = out.get("unscheduled_tasks", None)
-    if isinstance(uns, (list, tuple, set)):
-        out["unscheduled_tasks"] = [int(x) for x in uns]
-    else:
-        out["unscheduled_tasks"] = all_j
+    out["unscheduled_tasks"] = all_j
     out["penalties"] = penalties
     if reason:
         out["error"] = str(reason)
@@ -164,8 +160,8 @@ def _safe_evaluate(
     fail_cost: float = 1e30,
 ) -> Tuple[float, Dict[str, Any]]:
     """
-    ?????????evaluate??????????????????KeyError ?????????????????? ALNS ???????????????
-    ????????????????????????????????????????????? details?????? infeas-key ????????????????????????/?????????
+    保护性 evaluate：任何异常（KeyError 等）都不会把 ALNS 整体炸掉。
+    出错时返回一个“非常不可行”的 details，让 infeas-key 变大、自动被拒绝/淘汰。
     """
     try:
         obj, det = evaluator.evaluate(routes, shelf_seq, place)
@@ -190,9 +186,9 @@ def _normalize_one_route_ws_and_shelf(
     shelf_idx: Dict[int, Dict[int, int]],
 ) -> List[int]:
     """
-    ?????? route ?????????????????????
-      1) ?????????WS ???????????? ws_fixed_seq ??????
-      2) ?????? shelf ???????????????route ???slot ?????? shelf_seq ????????????
+    单条 route 的统一规范化：
+      1) 连续同 WS 的块内按 ws_fixed_seq 排序
+      2) 同一 shelf 链的任务在 route 内 slot 内按 shelf_seq 顺序排序
     """
     seq2 = _normalize_one_route_ws_blocks([int(x) for x in (seq or [])], evaluator)
     seq2 = _normalize_one_route_shelf_slots(seq2, chain_of, shelf_idx)
@@ -204,12 +200,12 @@ def _sanitize_task_shelf_mapping(
     verbose: bool = True,
 ) -> Optional[Dict[int, int]]:
     """
-    ???task_shelf_mapping ????????????task->chain(int)?????????????????????
-      - ?????? value ???None / NaN / ?????????int ??????
-      - key ?????? int ???
-    ?????????
-      - ???????????????dict
-      - ???None?????????????????????
+    把 task_shelf_mapping 清洗成“task->chain(int)”的干净字典：
+      - 丢弃 value 为 None / NaN / 无法转 int 的项
+      - key 也做 int 化
+    返回：
+      - 清洗后非空 dict
+      - 或 None（表示不可用）
     """
     if not task_shelf_mapping:
         return None
@@ -218,12 +214,12 @@ def _sanitize_task_shelf_mapping(
     bad = 0
 
     for j, c in task_shelf_mapping.items():
-        # ?????? None
+        # 丢弃 None
         if c is None:
             bad += 1
             continue
 
-        # ?????? NaN???????????? pandas ?????????
+        # 丢弃 NaN（常见于 pandas 读入）
         try:
             if isinstance(c, float) and math.isnan(c):
                 bad += 1
@@ -238,7 +234,7 @@ def _sanitize_task_shelf_mapping(
             continue
 
     if verbose and bad > 0:
-        print(f"[WARN] task_shelf_mapping dropped {bad} invalid entries (None/NaN/non-int)")
+        print(f"[WARN] task_shelf_mapping 中有 {bad} 条记录为 None/NaN/非法值，已忽略（这些任务将尝试从 shelf_seq 反推 chain）。")
 
     return out if out else None
 
@@ -250,18 +246,18 @@ def _build_chain_of_map(
     """
     task -> chain(c)
 
-    ?????????task_shelf_mapping??????????????????None/NaN/?????????????????????
-    ?????? mapping ???????????????????????? shelf_seq ???????????????
+    优先用 task_shelf_mapping（但要容错：None/NaN/非法会被忽略）
+    对于 mapping 缺失的任务，再从 shelf_seq 反推补齐。
     """
     mp: Dict[int, int] = {}
 
-    # 1) ?????????????????? mapping
+    # 1) 先用清洗后的 mapping
     clean = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
     if clean:
-        # clean ?????????int->int
+        # clean 已经是 int->int
         mp.update(clean)
 
-    # 2) ?????? shelf_seq ?????????????????????mp ?????????????????????
+    # 2) 再用 shelf_seq 反推补齐（只补 mp 中没有的任务）
     for c, seq in (shelf_seq or {}).items():
         try:
             cc = int(c)
@@ -276,77 +272,6 @@ def _build_chain_of_map(
                 mp[jj] = cc
 
     return mp
-
-
-def _ensure_shelf_seq_covers_all_tasks(
-    shelf_seq: Dict[int, List[int]],
-    *,
-    evaluator: RobustEvaluator,
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-) -> Dict[int, List[int]]:
-    """
-    Ensure every task in evaluator.J appears in exactly one shelf chain sequence.
-    """
-    out = _dc_shelf_seq(shelf_seq)
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-
-    all_tasks = [int(j) for j in evaluator.J]
-    all_set = set(all_tasks)
-    if not out:
-        if clean_map:
-            c0 = int(next(iter(clean_map.values())))
-        else:
-            c0 = 1
-        out = {int(c0): []}
-
-    # remove duplicates/unknowns in existing shelf_seq
-    seen: Set[int] = set()
-    for c in sorted(list(out.keys())):
-        seq = []
-        for j in out.get(c, []) or []:
-            jj = int(j)
-            if (jj in all_set) and (jj not in seen):
-                seen.add(jj)
-                seq.append(jj)
-        out[int(c)] = seq
-
-    chain_ids = sorted(int(c) for c in out.keys())
-    pi = getattr(evaluator, "pi", {}) or {}
-
-    # infer a representative ws for each chain
-    chain_ws: Dict[int, int] = {}
-    for c in chain_ids:
-        cnt: Dict[int, int] = {}
-        for j in out.get(c, []) or []:
-            ws = int(pi.get(int(j), -1))
-            cnt[ws] = int(cnt.get(ws, 0)) + 1
-        if cnt:
-            chain_ws[c] = max(cnt.items(), key=lambda kv: kv[1])[0]
-        else:
-            chain_ws[c] = -1
-
-    for j in all_tasks:
-        jj = int(j)
-        if jj in seen:
-            continue
-
-        c_pick: Optional[int] = None
-        if clean_map and (jj in clean_map):
-            c_try = int(clean_map[jj])
-            if c_try in out:
-                c_pick = c_try
-        if c_pick is None:
-            wsj = int(pi.get(jj, -1))
-            same = [c for c in chain_ids if int(chain_ws.get(c, -999)) == wsj]
-            if same:
-                c_pick = min(same, key=lambda cc: len(out.get(int(cc), [])))
-            else:
-                c_pick = min(chain_ids, key=lambda cc: len(out.get(int(cc), [])))
-
-        out[int(c_pick)].append(jj)
-        seen.add(jj)
-
-    return out
 
 
 
@@ -366,11 +291,11 @@ def _normalize_one_route_shelf_slots(
     shelf_idx: Dict[int, Dict[int, int]],
 ) -> List[int]:
     """
-    ??????????????? route ????????????shelf ???????????????????????? == shelf_seq[c]
+    ✅ 核心：让 route 内同一条 shelf 链的任务相对顺序 == shelf_seq[c]
 
-    ?????????slot ???????????????slot ????????????
-      - ?????????chain c?????????????????????seq ?????????????????? slots
-      - ?????????slots ???????????????shelf_seq[c] ???????????????????????????
+    做法（slot 重排，不跨 slot 改动）：
+      - 对每个 chain c：收集其任务在 seq 中出现的位置 slots
+      - 把这些 slots 上的任务按 shelf_seq[c] 的顺序排序后放回去
     """
     seq = [int(x) for x in (seq or [])]
     if len(seq) <= 1:
@@ -391,7 +316,7 @@ def _normalize_one_route_shelf_slots(
         order = shelf_idx.get(int(c), {})
         tlist = tasks.get(int(c), [])
 
-        # ?????? shelf_seq ????????????????????????????????????????????????
+        # 不在 shelf_seq 里的任务（理论上不该出现）放最后
         tlist.sort(key=lambda t: order.get(int(t), 10**9))
 
         for idx, t in zip(pos_list, tlist):
@@ -406,7 +331,7 @@ def normalize_routes_by_shelf_seq_order(
     task_shelf_mapping: Optional[Dict[int, int]] = None,
 ) -> Dict[int, List[int]]:
     """
-    ????????????AGV routes ??????shelf_seq ???v(???routes??????) ????????????????????????
+    ✅ 对所有 AGV routes 做 “shelf_seq ↔ v(由routes隐含) 顺序一致性” 修复
     """
     routes = _dc_routes(routes)
     shelf_seq = _dc_shelf_seq(shelf_seq)
@@ -450,12 +375,12 @@ def _infeas_components(details, evaluator):
 
 def _infeas_key(details, evaluator):
     unscheduled, tail, cell_measure = _infeas_components(details, evaluator)
-    # ?????????0.01 ???????????????float ????????????
+    # 量化到 0.01 精度，避免 float 比较抖动
     cell_score = int(round(cell_measure * 100))
     return (unscheduled, tail, cell_score)
 
 def _infeas_scalar(details, evaluator):
-    # ???????????????????????????????????????????????????????????? 1e4 ????????????
+    # 给“偶尔接受更差不可行度”用：尺度不要像 1e4 那么夸张
     unscheduled, tail, cell_measure = _infeas_components(details, evaluator)
     return float(unscheduled) * 1e4 + float(tail) * 1e2 + float(cell_measure)
 
@@ -500,7 +425,7 @@ def _safe_infeas_scalar(
 
 def _normalize_ws_blocks(routes: Dict[int, List[int]], evaluator: RobustEvaluator) -> Dict[int, List[int]]:
     """
-    ??????????????????????????????????????? WS ???????????? fixed ?????????????????????????????? WS ?????????????????????WS ????????????
+    对每条车路由，把“连续同一 WS 的块”按 fixed 顺序重排（只在相邻同 WS 内部排序，不跨 WS 调整）。
     """
     routes = _dc_routes(routes)
     pi = evaluator.pi
@@ -529,7 +454,7 @@ def _normalize_ws_blocks(routes: Dict[int, List[int]], evaluator: RobustEvaluato
     return routes
 def _ws_block_boundary_positions(seq: List[int], pi: Dict[int, int]) -> List[int]:
     """
-    ?????? route ??????WS ?????????????????????????????????WS ??????????????????len(seq)
+    返回 route 上“WS 块边界”插入点：0、每次 WS 变化的位置、len(seq)
     """
     seq = [int(x) for x in seq]
     if not seq:
@@ -543,7 +468,7 @@ def _ws_block_boundary_positions(seq: List[int], pi: Dict[int, int]) -> List[int
 
 def _normalize_one_route_ws_blocks(seq: List[int], evaluator: RobustEvaluator) -> List[int]:
     """
-    ???????????? route ?????????????????? WS ?????????????????????????????? normalize ???routes???
+    只对单条 route 做“连续同一 WS 块内排序”，避免每次 normalize 全 routes。
     """
     seq = [int(x) for x in seq]
     pi = evaluator.pi
@@ -870,12 +795,12 @@ def build_rule_prechecker(
     )
 class FastProxyEvaluatorLB:
     """
-    Level-1 ???????????????????????????/????????????????????????????????????????????????????????????(LB)???
-    ?????????
-      - ?????????????????? LB >= ?????? obj????????????????????????????????? ?????????
-      - ???????????????LB ???????????????????????????
-    ????????????????????????????????????????????? key ???????????????????????????????????????key ?????? RulePrechecker ?????????
-    ???????????? key ?????????0???????????? ????????????????????????????????????????????????????????????????????????
+    Level-1 代理：计算“无等待/无资源冲突/无鲁棒膨胀”的名义完成时间下界(LB)。
+    用途：
+      - 安全剪枝：若 LB >= 基准 obj，则该候选不可能改进（0 误杀）
+      - 候选排序：LB 越小越优先进入精评
+    注意：为保证“剪枝安全”，缺失 key 不允许当大数参与剪枝；缺失 key 应由 RulePrechecker 拦截。
+    这里缺失 key 统一当 0（更乐观 → 更安全的下界），最多会让排序弱一点，不会误剪。
     """
     def __init__(self, evaluator: RobustEvaluator, pre: RulePrechecker):
         self.pre = pre
@@ -914,8 +839,8 @@ class FastProxyEvaluatorLB:
         stop_at: Optional[float] = None,
     ) -> float:
         """
-        ????????????????????????????????????????????????
-        stop_at?????????????????????????????????????????????????????????
+        单车名义完成时间下界（无等待）。
+        stop_at：若超过阈值可提前返回（用于剪枝加速）
         """
         r = int(r)
         seq = [int(x) for x in (seq or [])]
@@ -929,7 +854,7 @@ class FastProxyEvaluatorLB:
             j = int(j)
             end_s = place_i.get(j, None)
             if end_s is None:
-                # ?????????0 ??????????????????????????????
+                # 下界取 0 更安全（不剪枝误杀）
                 return 0.0
             end_s = int(end_s)
 
@@ -955,7 +880,7 @@ class FastProxyEvaluatorLB:
         stop_at: Optional[float] = None,
     ) -> float:
         """
-        ???????????????max_r route_lb(r)
+        解的下界：max_r route_lb(r)
         """
         mx = 0.0
         bound = None if stop_at is None else float(stop_at)
@@ -980,12 +905,12 @@ def normalize_solution_by_ws_rank_once(
     global_try_tasks: int = 2,
 ) -> Tuple[Dict[int, List[int]], Dict[int, List[int]], Dict[int, int], bool, float]:
     """
-    ??????????????????????????????
-      - ???????????????j ?????? ws ???????????????rank = pos_in_ws / len(ws_seq)
-      - routes ?????? rank ????????????????????????
-      - shelf_seq ?????? rank ????????????????????????
-      - ???????????????place_tune ???????????????
-    ?????????routes_new, shelf_seq_new, place_new, improved, obj_new)
+    同步重排（破局用）：
+      - 对每个任务 j 定义 ws 归一化排名 rank = pos_in_ws / len(ws_seq)
+      - routes 内按 rank 排序（稳定排序）
+      - shelf_seq 内按 rank 排序（稳定排序）
+      - 然后跑一轮 place_tune 适配新顺序
+    返回：(routes_new, shelf_seq_new, place_new, improved, obj_new)
     """
     routes0 = _dc_routes(routes)
     shelf0 = _dc_shelf_seq(shelf_seq)
@@ -1009,17 +934,17 @@ def normalize_solution_by_ws_rank_once(
         den = ws_len.get(ws, 1)
         return float(pos) / float(max(1, den))
 
-    # --- 1) routes ???????????? ---
+    # --- 1) routes 同步重排 ---
     routes_new = _dc_routes(routes0)
     for r, seq in routes_new.items():
         seq2 = [int(x) for x in seq]
-        # ???????????????????????? tie-break
+        # 稳定：加原索引做 tie-break
         tagged = [(idx, j) for idx, j in enumerate(seq2)]
         tagged.sort(key=lambda it: (rank(it[1]), int(evaluator.pi.get(it[1], -1)), it[0]))
         routes_new[int(r)] = [j for _, j in tagged]
     routes_new = _normalize_ws_blocks(routes_new, evaluator)
 
-    # --- 2) shelf_seq ???????????? ---
+    # --- 2) shelf_seq 同步重排 ---
     shelf_new = _dc_shelf_seq(shelf0)
     for c, seq in shelf_new.items():
         seq2 = [int(x) for x in seq]
@@ -1027,7 +952,7 @@ def normalize_solution_by_ws_rank_once(
         tagged.sort(key=lambda it: (rank(it[1]), int(evaluator.pi.get(it[1], -1)), it[0]))
         shelf_new[int(c)] = [j for _, j in tagged]
 
-    # --- 3) ?????? place tune ?????? ---
+    # --- 3) 轻量 place tune 适配 ---
     place_new, _ = local_place_tune_once(
         routes=routes_new,
         shelf_seq=shelf_new,
@@ -1061,8 +986,10 @@ def _relabel_best_routes(
 ) -> Tuple[Dict[int, List[int]], float]:
     """
     Funnel relabel:
-      1) ???proxy LB ????????????AGV ????????????????????????
-      2) ?????? LB ????????? Top-K ???????????????evaluate ?????????    ??????????????????????????????????????? place ???shelf_seq ????????????????????????????????????????????????    """
+      1) 用 proxy LB 评估所有 AGV 标签排列的下界；
+      2) 仅对 LB 最小的 Top-K 排列做真实 evaluate 精评。
+    在不改各车内部任务顺序/不改 place 与 shelf_seq 的前提下，避免全排列全精评开销。
+    """
     routes = _dc_routes(routes)
     R_ids = sorted(int(r) for r in evaluator.R)
     seqs = [routes.get(r, []) for r in R_ids]
@@ -1128,7 +1055,7 @@ def _prev_on_chain(
     shelf_seq: Dict[int, List[int]],
     task_shelf_mapping: Optional[Dict[int, int]],
 ) -> Optional[int]:
-    """?????? j ???????????????????????????????????????j ???????????????????????????????????? None???"""
+    """返回 j 在其货架链上的前驱任务（若 j 在链首或缺少映射，则返回 None）"""
     if not task_shelf_mapping:
         return None
     c = int(task_shelf_mapping.get(int(j), -1))
@@ -1157,8 +1084,8 @@ def _cand_end_shelves_for_task(
     max_keep: Optional[int] = None,
 ) -> List[int]:
     """
-    ??????j ???????????????????????????m ???+ {?????????end_s ??????????????????} + {?????? place[j]????????????}
-    ???d_pi_s(j,s) ?????????????????? max_keep ??????????????????
+    构造 j 的回库位候选：最近 m 个 + {链前驱 end_s 或货架初始位} + {现有 place[j]（若有）}
+    按 d_pi_s(j,s) 升序去重；若 max_keep 给出则截断。
     """
     j = int(j)
     cands: Set[int] = set(int(s) for s in S_near_by_j.get(j, []))
@@ -1196,16 +1123,16 @@ def _augment_shelf_candidates(
     rng: random.Random,
     force_all_shelves: bool = False,
     extra_random_shelves: int = 0,
-    cap_total: int = 40,   # ???????????????????????????
+    cap_total: int = 40,   # ★关键：总候选封顶
 ) -> List[int]:
     """
-    ???base_cands ?????????????????????????????????????????????????????????????????? cap_total?????????|S| ???????????????
+    在 base_cands 上补充一些“远点货位”以增强探索，但永远封顶 cap_total，避免 |S| 大时爆炸。
     """
     cand_set: Set[int] = set(int(s) for s in base_cands)
     all_s = [int(s) for s in evaluator.S]
 
     if force_all_shelves:
-        # ???????????????????????? S????????????????????? cap_total???
+        # 不再直接使用全部 S，而是“补足到 cap_total”
         if len(cand_set) < cap_total:
             pool = [s for s in all_s if s not in cand_set]
             need = cap_total - len(cand_set)
@@ -1230,7 +1157,7 @@ def _topk_keep(
     cand: Tuple[float, int, int, int],
     k: int,
 ) -> None:
-    """????????????????????? k ??????????????????????????????????????????????????????????????????????????????"""
+    """维护一个容量为 k 的“当前最优候选集”（小顶意义），用替换最差的方式。"""
     k = max(1, int(k))
     if len(best_list) < k:
         best_list.append(cand)
@@ -1266,9 +1193,9 @@ def destroy_ws_gap_route_bundle(
     max_k: int = 4,
 ) -> Tuple[List[int], Set[int], Dict[int, List[int]]]:
     """
-    ???????????????WS idle gap?????????????????????cur_t???
-    ?????? cur_t ??????AGV ???route ????????????????????????????????????????????????????????????????????????????????????
-    ?????? removed_order ?????????cur_t ????????????????????????????????????????????????????????????
+    先找“最大 WS idle gap”的后一个任务 cur_t，
+    再在 cur_t 所在 AGV 的 route 上取一个偏向前缀的小段（把拖它变晚的前置任务一起删掉）。
+    返回 removed_order 时保证 cur_t 排第一（先插回，利于抢占前面位置/换车）。
     """
     routes = _dc_routes(routes)
     place = _dc_place(place)
@@ -1289,7 +1216,7 @@ def destroy_ws_gap_route_bundle(
     if not present:
         return [], set(), routes
 
-    # 1) ?????????idle gap ??????????????????best_cur
+    # 1) 找最大 idle gap 的后一个任务 best_cur
     best_gap = -1.0
     best_cur = None
     for ws, full_seq in ws_fixed.items():
@@ -1307,7 +1234,7 @@ def destroy_ws_gap_route_bundle(
     if best_cur is None:
         return [], set(), routes
 
-    # 2) ???best_cur ?????????????????????
+    # 2) 找 best_cur 所在车辆与位置
     r_hit, idx = None, None
     for r, seq in routes.items():
         if best_cur in seq:
@@ -1326,7 +1253,7 @@ def destroy_ws_gap_route_bundle(
     k = max(int(min_k), 1)
     k = min(k, max_k_eff)
 
-    # ??????????????? best_cur ???????????????????????????????????????????????? Task1 ???????????????
+    # 段尽量“以 best_cur 结尾”，把其前置任务带上（例如把 Task1 一起删掉）
     start = max(0, int(idx) - (k - 1))
     start = min(start, L - k)
     segment = [int(x) for x in seq_hit[start : start + k]]
@@ -1356,8 +1283,8 @@ def intensify_close_largest_ws_gap_once(
     force_all_shelves: bool = False,
 ) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
     """
-    ?????????????????????WS idle gap?????????????????????cur_t???
-    ??????????????????/???????????????route ??????????????????pos=0..early_pos_max?????????????????????first-improvement ??????????????????
+    针对“当前最大 WS idle gap”的后一个任务 cur_t：
+    尝试把它换车/前移到各车 route 的靠前位置（pos=0..early_pos_max），找到就收（first-improvement 的加强版）。
     """
     routes = _dc_routes(routes)
     place = _dc_place(place)
@@ -1398,12 +1325,12 @@ def intensify_close_largest_ws_gap_once(
 
     j_move = int(best_cur)
 
-    # ?????????????????? j_move
+    # 从原车上移除 j_move
     routes_removed = _dc_routes(routes)
     for r in list(routes_removed.keys()):
         routes_removed[r] = [x for x in routes_removed[r] if int(x) != j_move]
 
-    # ???????????????
+    # 候选回库位
     cand_s = _cand_end_shelves_for_task(
         j_move,
         place=place,
@@ -1456,7 +1383,7 @@ def destroy_random(
     remove_frac: float,
     rng: random.Random,
 ) -> Tuple[Set[int], Dict[int, List[int]]]:
-    """Random destroy: remove a fraction of tasks from routes."""
+    """随机移除一定比例任务（不改 shelf_seq / place）"""
     routes = _dc_routes(routes)
     all_tasks: List[int] = []
     for seq in routes.values():
@@ -1484,9 +1411,9 @@ def destroy_ws_largest_idle_gap(
     max_k: int = 5,
 ) -> Tuple[List[int], Set[int], Dict[int, List[int]]]:
     """
-    ???????????????WS ????????????????????????????????? idle gap??????????????????????????????????????????
-    ???????????????????????????WS2: Task2 -> Task4 ????????????????????????
-    ?????????removed_order, removed_set, routes_removed)
+    找到“某个 WS 上相邻两任务之间最大的 idle gap”，删掉包含这对任务的窗口。
+    目标：专打像你这次 WS2: Task2 -> Task4 之间的巨大空档。
+    返回：(removed_order, removed_set, routes_removed)
     """
     routes = _dc_routes(routes)
     place = _dc_place(place)
@@ -1533,7 +1460,7 @@ def destroy_ws_largest_idle_gap(
     max_k_eff = min(int(max_k), L)
     k = int(rng.randint(int(min_k), int(max_k_eff)))
 
-    # ?????????????????? (best_idx-1, best_idx)
+    # 窗口必须覆盖 (best_idx-1, best_idx)
     left = max(0, best_idx - 1 - (k // 2))
     left = min(left, L - k)
     removed_order = best_seq[left : left + k]
@@ -1551,35 +1478,35 @@ def destroy_robust_sensitive_bundle(
     evaluator: RobustEvaluator,
     rng: random.Random,
     task_shelf_mapping: Optional[Dict[int, int]] = None,
-    # ???????????????????????????seed ???????????????????????????????????????????????????
+    # 同车前置段长度（删 seed 前面的任务，专打“拖慢它”的前缀）
     pre_k: int = 2,
-    # ?????????????????????????????????chain_nei ??????
+    # 同链邻居半径（左右各取 chain_nei 个）
     chain_nei: int = 1,
-    # ???WS ???????????????????????????ws_nei ??????
+    # 同 WS 邻居半径（左右各取 ws_nei 个）
     ws_nei: int = 1,
-    # ?????????????????????
+    # 总删除规模控制
     min_k: int = 2,
     max_k: int = 5,
-    # ?????????????????????????????????top_m ???????????????seed??????????????????
+    # 从“鲁棒增量最大”的前 top_m 个任务里挑 seed（带随机性）
     top_m: int = 8,
 ) -> Tuple[List[int], Set[int], Dict[int, List[int]]]:
     """
-    ???????????? destroy?????????????????????????????? ALNS ???????????????????????????
+    鲁棒敏感 destroy（只加一个算子就能让 ALNS 更“懂鲁棒性”）：
 
-    ???????????????????????? j ?????? robust_slack[j] = q[j] - q0[j] ?????? q[G] - q[0]???
-    ?????????robust_slack ????????????????????????????????????????????????/????????????????????????
+    信号：对每个任务 j 计算 robust_slack[j] = q[j] - q0[j] （即 q[G] - q[0]）
+    直觉：robust_slack 大的任务，是“最坏情形膨胀最厉害/最敏感”的任务。
 
-    ?????????????????????seed??????
-      - seed ??????
-      - seed ??????AGV ?????????????????????pre_k ????????????????????????seed ????????????
-      - seed ?????????????????????????????????
-      - seed ?????????WS ??????????????????????????????/??????
-    ????????????/?????????[min_k, max_k]???
+    删除策略（围绕 seed）：
+      - seed 本身
+      - seed 所在 AGV 路线的前置段（pre_k 个），专打“拖慢 seed 的前缀”
+      - seed 同货架链的邻居（前/后）
+      - seed 同工位 WS 的邻居（固定序列中前/后）
+    然后截断/补齐到 [min_k, max_k]。
 
-    ?????????
-      removed_order: ?????? seed ???????????????repair ???????????? seed????????????????????????
+    返回：
+      removed_order: 保证 seed 在第一位（repair 时先插回 seed，利于“抢前”）
       removed_set
-      routes_removed?????????routes ?????????????????????shelf_seq/place???
+      routes_removed（只从 routes 中删任务，不改 shelf_seq/place）
     """
     routes = _dc_routes(routes)
     place = _dc_place(place)
@@ -1591,14 +1518,14 @@ def destroy_robust_sensitive_bundle(
     if not present:
         return [], set(), routes
 
-    # ?????????q/q0???????????????????????????????????????evaluate??????????????????
+    # 为了拿 q/q0（鲁棒增量），我们只做一次 evaluate（成本很低）
     routes_norm = _normalize_ws_blocks(routes, evaluator)
     _, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
 
     q_raw = (diag.get("q", {}) if isinstance(diag, dict) else {}) or {}
     q0_raw = (diag.get("q0", {}) if isinstance(diag, dict) else {}) or {}
 
-    # ?????? key=int
+    # 统一 key=int
     try:
         q_map = {int(k): float(v) for k, v in q_raw.items()}
     except Exception:
@@ -1608,18 +1535,18 @@ def destroy_robust_sensitive_bundle(
     except Exception:
         q0_map = {}
 
-    # ?????????????????? slack = q - q0
+    # 计算鲁棒增量 slack = q - q0
     slack: Dict[int, float] = {}
     for j in present:
         if j in q_map:
-            base0 = q0_map.get(j, q_map[j])  # ?????? q0?????? slack=0
+            base0 = q0_map.get(j, q_map[j])  # 若缺 q0，则 slack=0
             slack[j] = float(q_map[j] - float(base0))
 
-    # ?????? slack ?????? 0??????????????????????????????????????? q ??????????????????
+    # 如果 slack 全是 0（极端情况），就退化为“按 q 最大挑瓶颈”
     if (not slack) or (max(slack.values()) <= 1e-9):
         slack = {j: float(q_map.get(j, 0.0)) for j in present if j in q_map}
 
-    # ?????????????????? q ?????????????????????allow_incomplete ???????????????????????? seed
+    # 兜底：如果连 q 都没有（通常是 allow_incomplete 造成），就随机挑 seed
     if not slack:
         seed = int(rng.choice(sorted(present)))
         slack = {seed: 0.0}
@@ -1628,10 +1555,10 @@ def destroy_robust_sensitive_bundle(
         top = ranked[: max(1, int(top_m))]
         seed = int(rng.choice([j for j, _ in top]))
 
-    # ========== ???????????? ==========
+    # ========== 收集邻居 ==========
     prio: List[int] = [seed]
 
-    # (1) ?????????????????????seed ?????? pre_k ?????????
+    # (1) 同车前置段：删 seed 前面 pre_k 个任务
     r_hit = None
     idx_hit = None
     seq_hit: List[int] = []
@@ -1644,13 +1571,13 @@ def destroy_robust_sensitive_bundle(
     if r_hit is not None and idx_hit is not None and seq_hit:
         start = max(0, idx_hit - max(0, int(pre_k)))
         prefix = [int(x) for x in seq_hit[start:idx_hit]]
-        # ???seed ???????????????????????????
+        # 离 seed 最近的前置任务优先
         prefix = list(reversed(prefix))
         for x in prefix:
             if x in present:
                 prio.append(int(x))
 
-    # (2) ???????????????????????? chain_nei ???
+    # (2) 同链邻居：左右各 chain_nei 个
     if task_shelf_mapping is not None:
         c = task_shelf_mapping.get(int(seed), None)
         if c is not None:
@@ -1660,7 +1587,7 @@ def destroy_robust_sensitive_bundle(
                 pos = int(seq_c.index(int(seed)))
                 left = seq_c[max(0, pos - int(chain_nei)):pos]
                 right = seq_c[pos + 1: pos + 1 + int(chain_nei)]
-                # ????????????????????????????????????????????????????????????
+                # 近的优先：先左边从近到远，再右边从近到远
                 left = list(reversed(left))
                 for x in left + right:
                     if int(x) in present:
@@ -1668,7 +1595,7 @@ def destroy_robust_sensitive_bundle(
             except ValueError:
                 pass
 
-    # (3) ???WS ?????????????????????????????????ws_nei ???
+    # (3) 同 WS 邻居：固定序列里左右各 ws_nei 个
     ws_fixed = getattr(evaluator, "ws_fixed_seq", {}) or {}
     ws = evaluator.pi.get(int(seed), None)
     if ws is not None:
@@ -1685,7 +1612,7 @@ def destroy_robust_sensitive_bundle(
         except ValueError:
             pass
 
-    # ========== ?????? removed_set??????????????????==========
+    # ========== 组装 removed_set（截断/补齐） ==========
     min_k = max(1, int(min_k))
     max_k = max(min_k, int(max_k))
 
@@ -1699,7 +1626,7 @@ def destroy_robust_sensitive_bundle(
         if len(removed) >= max_k:
             break
 
-    # ?????? min_k?????? slack ????????????
+    # 不够 min_k：用 slack 排名补齐
     if len(removed) < min_k:
         ranked_fill = sorted(slack.items(), key=lambda kv: kv[1], reverse=True)
         for j, _ in ranked_fill:
@@ -1712,7 +1639,7 @@ def destroy_robust_sensitive_bundle(
 
     removed_set = set(int(x) for x in removed)
 
-    # removed_order?????????seed ?????????????????? prio ?????????????????????????????? slack ?????????
+    # removed_order：保证 seed 第一，其余按 prio 顺序补齐，再补漏（按 slack 降序）
     removed_order: List[int] = [int(seed)]
     for x in prio:
         xx = int(x)
@@ -1722,7 +1649,7 @@ def destroy_robust_sensitive_bundle(
     rest.sort(key=lambda j: float(slack.get(int(j), 0.0)), reverse=True)
     removed_order.extend(rest)
 
-    # ???routes ?????????removed_set
+    # 从 routes 里删掉 removed_set
     for r in list(routes.keys()):
         routes[int(r)] = [int(j) for j in routes[int(r)] if int(j) not in removed_set]
 
@@ -1737,7 +1664,7 @@ def _relatedness(
     shelf_seq: Dict[int, List[int]],
     task_shelf_mapping: Optional[Dict[int, int]],
 ) -> float:
-    """Shaw??????????????????/?????????WS????????????/????????????????????????????????????"""
+    """Shaw相关度：同链/同工位/WS顺序邻近/回库位接近（越大越相关）"""
     a = int(a)
     b = int(b)
     same_chain = (
@@ -1777,7 +1704,7 @@ def destroy_shaw_related(
     rng: random.Random,
     remove_frac: float,
 ) -> Tuple[Set[int], Dict[int, List[int]]]:
-    """Shaw/Related destroy?????????????????????????????????"""
+    """Shaw/Related destroy：以“相关度”成簇删除"""
     routes = _dc_routes(routes)
     place = _dc_place(place)
 
@@ -1795,7 +1722,7 @@ def destroy_shaw_related(
     scores: List[Tuple[float, int]] = []
     for j in pool:
         if int(j) == seed:
-            continue  # ?????? seed ??????
+            continue  # 避免 seed 重复
         s = _relatedness(
             seed,
             j,
@@ -1821,7 +1748,7 @@ def destroy_chain(
     shelf_seq: Dict[int, List[int]],
     rng: random.Random,
 ) -> Tuple[Set[int], Dict[int, List[int]]]:
-    """???????????????????????????????????????????????????????????????????????????"""
+    """随机抽一个货架链，把该链上的任务从所有车路由里删除"""
     routes = _dc_routes(routes)
     if not shelf_seq:
         return set(), routes
@@ -1848,14 +1775,14 @@ def destroy_ws_critical_window(
     evaluator: RobustEvaluator,
     rng: random.Random,
     min_k: int = 2,
-    max_k: int = 5,  # ?????????????????? 5
+    max_k: int = 5,  # ★默认加大到 5
 ) -> Tuple[List[int], Set[int], Dict[int, List[int]]]:
     """
-    WS-focused destroy???
-      1) ?????????makespan ?????????????????????j*
-      2) ???????????? ws ???fixed ???????????????????????????j* ??????????????????k)
-      3) ?????????????????????
-    ?????????removed_order, removed_set, routes_removed)
+    WS-focused destroy：
+      1) 找当前 makespan 对应的关键任务 j*
+      2) 在其工位 ws 的 fixed 序列中抽一个“包含 j* 的窗口”(长度k)
+      3) 删除窗口内任务
+    返回：(removed_order, removed_set, routes_removed)
     """
     routes = _dc_routes(routes)
     place = _dc_place(place)
@@ -1874,7 +1801,7 @@ def destroy_ws_critical_window(
     _, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
     q = diag.get("q", {}) if isinstance(diag, dict) else {}
 
-    # ?????????present ??????????????????????????? dummy / ???pi ?????????????????????
+    # ★只在 present 内选关键任务，避免 dummy / 缺 pi 的任务导致失败
     q_present = {int(j): float(v) for j, v in (q or {}).items() if int(j) in present}
     if q_present:
         j_star = int(max(q_present.keys(), key=lambda jj: q_present[jj]))
@@ -1889,7 +1816,7 @@ def destroy_ws_critical_window(
 
     L = len(ws_seq)
     if L <= min_k:
-        removed_order = ws_seq[:]  # ??????
+        removed_order = ws_seq[:]  # 全删
     else:
         max_k_eff = min(int(max_k), L)
         k = int(rng.randint(int(min_k), int(max_k_eff)))
@@ -1927,21 +1854,17 @@ def repair_greedy_insert_with_place(
     max_agv_candidates: Optional[int] = None,
     max_pos_per_route: Optional[int] = None,
 
-    # ???????????????
+    # ✅ 评估预算
     max_evals_per_task: Optional[int] = None,
     max_evals_total: Optional[int] = None,
     copy_inputs: bool = True,
 
-    # ???cheap ?????????????????????
+    # ✅ cheap 预筛选（核心）
     preselect_m: int = 12,
     preselect_per_pos_shelves: int = 2,
 
-    # ordered insertion and strict-constructor switches
+    # ✅ 新增：如果提供 removed_order，则严格按该顺序插回（seed-first）
     removed_order: Optional[List[int]] = None,
-    strict_construct: bool = False,
-    strict_bruteforce_fallback: bool = False,
-    require_finite_eval: bool = False,
-    eval_fail_cost: float = 1e30,
 ) -> Tuple[Dict[int, List[int]], Dict[int, int]]:
 
     if copy_inputs:
@@ -1961,7 +1884,7 @@ def repair_greedy_insert_with_place(
     ws_pos = _ws_index(ws_fixed)
     pi = getattr(evaluator, "pi", {}) or {}
 
-    # ???shelf_seq ???v ?????????????????????????????????????????????
+    # ✅ shelf_seq ↔ v 一致性：一次性构建（后面复用）
     chain_of = _build_chain_of_map(shelf_seq, task_shelf_mapping)
     shelf_idx = _shelf_index(shelf_seq)
 
@@ -1970,10 +1893,10 @@ def repair_greedy_insert_with_place(
         return int(ws_pos.get(ws, {}).get(int(j), 10**9))
 
     # --------------------------
-    # 1) ?????????????????? removed_list
+    # 1) 生成插回顺序 removed_list
     # --------------------------
     if removed_order is not None:
-        # ???????????????????????????????????? & ???removed_set ??????
+        # 严格按给定顺序，但要去重 & 与 removed_set 对齐
         base_set = removed_set if removed_set else set(int(x) for x in removed_order)
         seen = set()
         ordered = []
@@ -1983,7 +1906,7 @@ def repair_greedy_insert_with_place(
                 ordered.append(xx)
                 seen.add(xx)
 
-        # ?????? removed_set ???????????????????????????????????????????????????????????????ws ??????
+        # 如果 removed_set 有额外任务（理论上不该发生），补到末尾（按 ws 排）
         rest = [int(x) for x in base_set if int(x) not in seen]
         rng.shuffle(rest)
         rest.sort(key=lambda j: (_ws_rank(j), rng.random()))
@@ -1996,7 +1919,7 @@ def repair_greedy_insert_with_place(
     if not removed_list:
         return routes, place
 
-    # ===== prechecker??????????????????=====
+    # ===== prechecker（一次构建）=====
     pre = build_rule_prechecker(
         evaluator=evaluator,
         shelf_seq=shelf_seq,
@@ -2004,20 +1927,20 @@ def repair_greedy_insert_with_place(
         shelf_init_override=shelf_init_override,
     )
 
-    # succ_on_chain???cheap ???????????????????????????
+    # succ_on_chain：cheap 里可轻微考虑链后继
     succ_on_chain: Dict[int, int] = {}
     for t, prev in (pre.pred_on_chain or {}).items():
         if prev is not None:
             succ_on_chain[int(prev)] = int(t)
 
-    # remaining_unfixed?????????routes ?????????????????????????????????tail ???????????????
+    # remaining_unfixed：当前 routes 中缺失的任务集合（用于 tail 冲突忽略）
     all_tasks: Set[int] = set(int(x) for x in evaluator.J)
     present_tasks: Set[int] = set()
     for seq in routes.values():
         present_tasks.update(int(x) for x in (seq or []))
     remaining_unfixed: Set[int] = (all_tasks - present_tasks) | set(int(x) for x in removed_list)
 
-    # ????????????????????????????????????
+    # 距离引用（局部变量更快）
     d_s_s = getattr(evaluator, "d_s_s", {}) or {}
     d_s_pi = getattr(evaluator, "d_s_pi", {}) or {}
     d_pi_s = getattr(evaluator, "d_pi_s", {}) or {}
@@ -2049,74 +1972,6 @@ def repair_greedy_insert_with_place(
                 seen.add(r)
         return out
 
-    def _strict_bruteforce_pick(
-        *,
-        j: int,
-        cand_shelves_local: List[int],
-    ) -> Optional[Tuple[Tuple[int, int, int], float, int, int, int, List[int]]]:
-        """
-        Strict fallback for constructor mode:
-        bypass precheck-pruned neighborhood and evaluate full insert moves.
-        """
-        shelf_set = {int(s) for s in (cand_shelves_local or [])}
-        if (not shelf_set) or bool(force_all_shelves):
-            shelf_set = {int(s) for s in evaluator.S}
-        else:
-            for s_all in evaluator.S:
-                shelf_set.add(int(s_all))
-        shelves = sorted(shelf_set)
-
-        best_rec: Optional[Tuple[Tuple[int, int, int], float, int, int, int, List[int]]] = None
-        for r in R_ids:
-            base_seq = routes[int(r)]
-            pos_list = _ws_block_boundary_positions(base_seq, evaluator.pi)
-            seen_route_keys: Set[Tuple[int, Tuple[int, ...]]] = set()
-            for pos in pos_list:
-                seq_ins = list(base_seq)
-                seq_ins.insert(int(pos), int(j))
-                seq_ins = _normalize_one_route_ws_and_shelf(
-                    seq_ins,
-                    evaluator=evaluator,
-                    chain_of=chain_of,
-                    shelf_idx=shelf_idx,
-                )
-                route_key = (int(r), tuple(int(x) for x in seq_ins))
-                if route_key in seen_route_keys:
-                    continue
-                seen_route_keys.add(route_key)
-
-                old_seq = routes[int(r)]
-                old_place = place.get(int(j), None)
-                for ss in shelves:
-                    routes[int(r)] = list(seq_ins)
-                    place[int(j)] = int(ss)
-                    try:
-                        obj_f, det = _safe_evaluate(
-                            evaluator,
-                            routes,
-                            shelf_seq,
-                            place,
-                            fail_cost=eval_fail_cost,
-                        )
-                        if require_finite_eval:
-                            try:
-                                obj_ff = float(obj_f)
-                                if (not math.isfinite(obj_ff)) or (obj_ff >= float(eval_fail_cost) * 0.999999):
-                                    continue
-                            except Exception:
-                                continue
-                        key = _safe_infeas_key(det, evaluator, obj=obj_f)
-                        rec = (tuple(key), float(obj_f), int(r), int(pos), int(ss), list(seq_ins))
-                        if (best_rec is None) or ((rec[0], rec[1]) < (best_rec[0], best_rec[1])):
-                            best_rec = rec
-                    finally:
-                        routes[int(r)] = old_seq
-                        if old_place is None:
-                            place.pop(int(j), None)
-                        else:
-                            place[int(j)] = int(old_place)
-        return best_rec
-
     def _cheap_insert_score(
         *,
         j: int,
@@ -2126,7 +1981,7 @@ def repair_greedy_insert_with_place(
         base_seq: List[int],
     ) -> float:
         """
-        cheap ??????????????????????????????????????????????????????????????????????????????
+        cheap 分数：越小越好。只用局部距离结构估计增量，不做仿真。
         """
         j = int(j); r = int(r); pos = int(pos); end_s = int(end_s)
 
@@ -2163,7 +2018,7 @@ def repair_greedy_insert_with_place(
         j = int(j)
         eval_used_task = 0
 
-        # ?????? j ???????????????????????? tail ?????????
+        # 每个 j 重算一次“已固定 tail 占用”
         used_tail = pre.build_used_tail_cells(place=place, ignore_tasks=remaining_unfixed)
 
         cand_shelves = _cand_end_shelves_for_task(
@@ -2189,7 +2044,7 @@ def repair_greedy_insert_with_place(
 
         agv_cands = _pick_agv_candidates()
 
-        # ===== 1) ???????????? + cheap ?????????=====
+        # ===== 1) 规则剪枝 + cheap 预筛选 =====
         # cheap_pool: (cheap, r, pos, s, seq_ins)
         cheap_pool: List[Tuple[float, int, int, int, List[int]]] = []
 
@@ -2213,7 +2068,7 @@ def repair_greedy_insert_with_place(
                 seq_ins = base_seq[:]
                 seq_ins.insert(pos, j)
 
-                # ???route ?????????????????????WS???+ shelf slot???
+                # ✅ route 内统一规范化（WS块 + shelf slot）
                 seq_ins = _normalize_one_route_ws_and_shelf(
                     seq_ins,
                     evaluator=evaluator,
@@ -2226,7 +2081,7 @@ def repair_greedy_insert_with_place(
                     continue
                 seen_route_keys.add(key)
 
-                # ?????????????????????end_s
+                # 规则剪枝：过滤 end_s
                 ok_s: List[int] = []
                 for s in cand_shelves:
                     ss = int(s)
@@ -2235,10 +2090,10 @@ def repair_greedy_insert_with_place(
                         r=r,
                         pos=pos,
                         end_s=ss,
-                        routes=routes,      # base routes?????????j???
+                        routes=routes,      # base routes（不含 j）
                         place=place,
                         used_tail_cells=used_tail,
-                        strict_move1=False, # ???????????????
+                        strict_move1=False, # 仍保持保守
                     )
                     if ok:
                         ok_s.append(ss)
@@ -2254,17 +2109,7 @@ def repair_greedy_insert_with_place(
                     cheap_pool.append((float(c), int(r), int(pos), int(ss), list(seq_ins)))
 
         if not cheap_pool:
-            if strict_construct:
-                if strict_bruteforce_fallback:
-                    brute = _strict_bruteforce_pick(j=int(j), cand_shelves_local=cand_shelves)
-                    if brute is not None:
-                        _, _, rr, _, ss, seq_ins = brute
-                        routes[int(rr)] = list(seq_ins)
-                        place[int(j)] = int(ss)
-                        remaining_unfixed.discard(int(j))
-                        continue
-                raise RuntimeError(f"strict_construct: no legal candidate for task {j}")
-            # ????????????????????????
+            # 兜底：最短车尾插
             r_fb = _least_loaded_agv(routes, R_ids)
             routes[int(r_fb)].append(j)
             routes[int(r_fb)] = _normalize_one_route_ws_and_shelf(
@@ -2277,11 +2122,11 @@ def repair_greedy_insert_with_place(
             remaining_unfixed.discard(int(j))
             continue
 
-        # ???????????? cheap ????????????preselect_m ???
+        # 全局保留 cheap 最好的前 preselect_m 个
         cheap_pool.sort(key=lambda x: x[0])
         cheap_pool = cheap_pool[: max(1, int(preselect_m))]
 
-        # ===== 2) ?????????????????????safe evaluate???====
+        # ===== 2) 精评少量候选（safe evaluate）=====
         scored_cands: List[Tuple[Tuple[int, int, int], float, int, int, int, List[int]]] = []
         # (infeas_key, obj, r, pos, s, seq_ins)
 
@@ -2297,20 +2142,7 @@ def repair_greedy_insert_with_place(
             routes[rr] = seq_ins
             place[j] = int(ss)
             try:
-                obj_f, det = _safe_evaluate(
-                    evaluator,
-                    routes,
-                    shelf_seq,
-                    place,
-                    fail_cost=eval_fail_cost,
-                )
-                if require_finite_eval:
-                    try:
-                        obj_ff = float(obj_f)
-                        if (not math.isfinite(obj_ff)) or (obj_ff >= float(eval_fail_cost) * 0.999999):
-                            continue
-                    except Exception:
-                        continue
+                obj_f, det = _safe_evaluate(evaluator, routes, shelf_seq, place)
                 key = _safe_infeas_key(det, evaluator, obj=obj_f)
                 scored_cands.append((tuple(key), float(obj_f), int(rr), int(pp), int(ss), list(seq_ins)))
 
@@ -2324,28 +2156,15 @@ def repair_greedy_insert_with_place(
                     place[j] = int(old_place)
 
         if not scored_cands:
-            if strict_construct:
-                if strict_bruteforce_fallback:
-                    brute = _strict_bruteforce_pick(j=int(j), cand_shelves_local=cand_shelves)
-                    if brute is not None:
-                        _, _, rr, _, ss, seq_ins = brute
-                        routes[int(rr)] = list(seq_ins)
-                        place[int(j)] = int(ss)
-                        remaining_unfixed.discard(int(j))
-                        continue
-                raise RuntimeError(f"strict_construct: no evaluated candidate for task {j}")
-            # Fallback to cheapest unevaluated candidate when strict mode is off.
+            # 没有精评候选：直接用 cheap 最好者落地（不再额外 evaluate）
             _, rr, pp, ss, seq_ins = cheap_pool[0]
             routes[int(rr)] = list(seq_ins)
             place[j] = int(ss)
         else:
-            # ???infeas_key ???????????????obj
+            # ✅ infeas_key 优先，再按 obj
             scored_cands.sort(key=lambda x: (x[0], x[1]))
-            if strict_construct:
-                _, _, rr, pp, ss, seq_ins = scored_cands[0]
-            else:
-                kpick = min(max(1, int(top_k_random)), len(scored_cands))
-                _, _, rr, pp, ss, seq_ins = rng.choice(scored_cands[:kpick])
+            kpick = min(max(1, int(top_k_random)), len(scored_cands))
+            _, _, rr, pp, ss, seq_ins = rng.choice(scored_cands[:kpick])
 
             routes[int(rr)] = list(seq_ins)
             place[j] = int(ss)
@@ -2372,17 +2191,13 @@ def repair_greedy_insert_with_place_ordered(
     max_agv_candidates: Optional[int] = None,
     max_pos_per_route: Optional[int] = None,
 
-    # shared evaluation budgets across ordered insertion
+    # ✅ 评估预算（跨任务共享）
     max_evals_per_task: Optional[int] = None,
     max_evals_total: Optional[int] = None,
-    strict_construct: bool = False,
-    strict_bruteforce_fallback: bool = False,
-    require_finite_eval: bool = False,
-    eval_fail_cost: float = 1e30,
 ) -> Tuple[Dict[int, List[int]], Dict[int, int]]:
     """
-    Ordered repair???????????? removed_order ?????????seed-first??????
-    ?????????????????????repair?????????????????????????????????????????????????????????
+    Ordered repair：严格按 removed_order 插回（seed-first）。
+    现在改成“单次 repair”，共享缓存与总预算，速度会明显提升。
     """
     removed_order = [int(x) for x in (removed_order or [])]
     removed_set = set(int(x) for x in removed_order)
@@ -2393,7 +2208,7 @@ def repair_greedy_insert_with_place_ordered(
         place=place,
         evaluator=evaluator,
         removed=removed_set,
-        removed_order=removed_order,  # ?????????????????????????????????
+        removed_order=removed_order,  # ✅ 核心：顺序由这里控制
         rng=rng,
         S_near_by_j=S_near_by_j,
         task_shelf_mapping=task_shelf_mapping,
@@ -2407,10 +2222,6 @@ def repair_greedy_insert_with_place_ordered(
         max_evals_per_task=max_evals_per_task,
         max_evals_total=max_evals_total,
         copy_inputs=True,
-        strict_construct=strict_construct,
-        strict_bruteforce_fallback=strict_bruteforce_fallback,
-        require_finite_eval=require_finite_eval,
-        eval_fail_cost=eval_fail_cost,
     )
 
 # =========================
@@ -2429,15 +2240,15 @@ def local_place_tune_once(
     top_k_try: int = 4,
     global_try_tasks: int = 0,
 
-    # ?????????????????????+ ????????????????????????
+    # ✅ 新增：总预算 + 候选封顶（防爆）
     max_evals: Optional[int] = 200,
     cap_total: int = 60,
 ) -> Tuple[Dict[int, int], bool]:
     """
-    place ????????????????????????
-      - ???????????????????????????top_k_try
-      - ??????????????????????????? S???????????????????????????cap_total
-      - ?????????????????? max_evals ??????
+    place 微调（防爆版）：
+      - 常规任务：只试近邻 top_k_try
+      - 关键任务：不再“全 S”，而是补足采样到 cap_total
+      - 总评估次数受 max_evals 控制
     """
     improved = False
     place = _dc_place(place)
@@ -2451,7 +2262,7 @@ def local_place_tune_once(
 
     keys = [int(j) for j in place.keys()]
 
-    # --- ?????????????????????q ??????---
+    # --- 选关键任务：按 q 最大 ---
     global_set: Set[int] = set()
     q_map: Dict[int, float] = {}
     if isinstance(diag, dict):
@@ -2468,7 +2279,7 @@ def local_place_tune_once(
         else:
             global_set = set(rng.sample(keys, min(int(global_try_tasks), len(keys))))
 
-    # ????????????????????????????????????????????????
+    # 遍历顺序：关键任务优先，其余随机
     order: List[int] = []
     if global_set:
         if q_map:
@@ -2488,9 +2299,9 @@ def local_place_tune_once(
         if budget is not None and budget <= 0:
             break
 
-        # ????????????
+        # 构造候选
         if j in global_set:
-            # ?????????????????????????????? cap_total?????????S???
+            # 关键任务：采样补足到 cap_total（不全 S）
             cands_base = _cand_end_shelves_for_task(
                 int(j),
                 place=place,
@@ -2568,11 +2379,11 @@ def intensify_shelf_seq_promote_critical_ws_once(
     max_trials: int = 12,
 ) -> Tuple[Dict[int, List[int]], bool, float]:
     """
-    ???????????????????????????????????????????????????j*???q ????????????????????????ws* ?????????????????????
-    ???????????????????????????????????????ws* ????????????????????????????????????ws_fixed_seq ?????????????????????????????????
-    ???????????? makespan???????????? inf -> finite??????????????????
+    强化算子：识别当前解的“关键任务” j*（q 最大），取其工位 ws* 作为关键工位。
+    然后尝试在每条货架链内，把 ws* 上的任务整体往前推（并用 ws_fixed_seq 的顺序作为二级排序）。
+    若能改善 makespan（甚至从 inf -> finite），就接受。
 
-    ?????????new_shelf_seq, improved, new_obj)
+    返回：(new_shelf_seq, improved, new_obj)
     """
     routes_norm = _normalize_ws_blocks(routes, evaluator)
     base_obj, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
@@ -2582,7 +2393,7 @@ def intensify_shelf_seq_promote_critical_ws_once(
     if not q_map:
         return shelf_seq, False, base_obj
 
-    # ???????????????makespan ?????????
+    # 关键任务（makespan 任务）
     j_star = int(max(q_map.keys(), key=lambda jj: float(q_map[jj])))
     ws_star = evaluator.pi.get(j_star, None)
     if ws_star is None:
@@ -2597,13 +2408,13 @@ def intensify_shelf_seq_promote_critical_ws_once(
         if ws is None:
             return (2, 10**9, orig_pos)
         ws = int(ws)
-        # ??????????????????
+        # 关键工位优先
         pri = 0 if ws == ws_star else 1
-        # ????????????????????????????????????
+        # 在各自工位内部按固定顺序
         ord_in_ws = ws_idx.get(ws, {}).get(j, 10**9)
         return (pri, int(ord_in_ws), orig_pos)
 
-    # ?????? A???????????????????????????????????????????????????????????????
+    # 方案 A：对每条链做一次“关键工位优先”的稳定排序
     candA = _dc_shelf_seq(shelf_seq)
     for c, seq in candA.items():
         seq2 = list(seq)
@@ -2616,11 +2427,11 @@ def intensify_shelf_seq_promote_critical_ws_once(
     if objA < base_obj - 1e-9:
         return candA, True, objA
 
-    # ?????? B????????????????????????????????????????????????????????????????????????????????????
+    # 方案 B：如果整体排序没用，再做若干次“单点前移”试探（更温柔）
     best_seq = shelf_seq
     best_obj = base_obj
 
-    # ?????????????????????????????????????????????????????????????????????
+    # 收集“包含关键工位任务、且该任务不在链首”的链
     shelves = []
     for c, seq in shelf_seq.items():
         seq2 = [int(x) for x in seq]
@@ -2638,13 +2449,13 @@ def intensify_shelf_seq_promote_critical_ws_once(
     for _ in range(max(1, int(max_trials))):
         c = int(rng.choice(shelves))
         seq = [int(x) for x in shelf_seq[int(c)]]
-        # ?????????????????????????????????????????????
+        # 找一个关键工位任务（不在首位）
         cand_pos = [i for i, j in enumerate(seq) if i > 0 and int(evaluator.pi.get(j, -1)) == ws_star]
         if not cand_pos:
             continue
         i = int(rng.choice(cand_pos))
         j = int(seq[i])
-        # ????????????????????????????????????0..i-1???
+        # 把它前移到更靠前的位置（0..i-1）
         new_pos = int(rng.randrange(0, i))
         if new_pos == i:
             continue
@@ -2674,24 +2485,21 @@ def local_shelf_seq_relocate_once(
     evaluator: RobustEvaluator,
     task_shelf_mapping: Dict[int, int],
     rng: random.Random,
-    max_evals: Optional[int] = 120,
 ) -> Tuple[Dict[int, List[int]], bool]:
     """
-    ???????????????????????????????????????first-improvement??????
-    ?????? routes / place?????????shelf_seq ?????????????????????
+    同一货架链上的单点重定位（first-improvement）：
+    固定 routes / place，只在 shelf_seq 上做邻域搜索。
 
     SPEED FIX:
-      - routes ?????????routes_norm ????????????????????????????????????????????????normalize ???????????????
-      - cand_shelf_seq ???shallow copy???dict(...)???????????????????????????????????????shelf_seq
+      - routes 不变：routes_norm 只算一次并复用（原版本在内层重复 normalize 是纯开销）
+      - cand_shelf_seq 用 shallow copy（dict(...)）即可，避免每次深拷贝整个 shelf_seq
     """
     shelf_seq = _dc_shelf_seq(shelf_seq)
 
-    # ???routes ???????????? normalize ??????
+    # ✅ routes 不变：只 normalize 一次
     routes_norm = _normalize_ws_blocks(routes, evaluator)
     base_obj, _ = evaluator.evaluate(routes_norm, shelf_seq, place)
     base_obj = float(base_obj)
-    eval_budget = None if (max_evals is None) else max(0, int(max_evals))
-    eval_used = 0
 
     shelves = list(shelf_seq.keys())
     rng.shuffle(shelves)
@@ -2712,8 +2520,6 @@ def local_shelf_seq_relocate_once(
                 continue
 
             for pos in range(L):
-                if (eval_budget is not None) and (eval_budget <= 0):
-                    break
                 if pos == idx:
                     continue
 
@@ -2721,21 +2527,14 @@ def local_shelf_seq_relocate_once(
                 cand.pop(idx)
                 cand.insert(pos, j)
 
-                # ???shallow copy ???????????????????????????
+                # ✅ shallow copy 足够：只替换一条链
                 cand_shelf_seq = dict(shelf_seq)
                 cand_shelf_seq[int(c)] = cand
 
                 obj, _ = evaluator.evaluate(routes_norm, cand_shelf_seq, place)
-                eval_used += 1
-                if eval_budget is not None:
-                    eval_budget -= 1
                 if float(obj) < base_obj - 1e-9:
                     shelf_seq[int(c)] = cand
                     return shelf_seq, True
-            if (eval_budget is not None) and (eval_budget <= 0):
-                break
-        if (eval_budget is not None) and (eval_budget <= 0):
-            break
 
     return shelf_seq, False
 
@@ -2758,14 +2557,14 @@ def cross_vehicle_move_once(
     max_trials: int = 3,
     max_pos_samples: int = 8,
     max_s_samples: int = 5,
-    max_evals: int = 10,  # ??????????????????????????????????????? 8~12???
+    max_evals: int = 10,  # ★最多精评多少个候选（建议 8~12）
 ) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
     """
     Funnel cross-vehicle:
       Generate candidates (no evaluate)
         -> RulePrecheck
-        -> Proxy-LB ??????/??????
-        -> ???evaluate Top-K
+        -> Proxy-LB 排序/剪枝
+        -> 只 evaluate Top-K
     """
 
     routes = _dc_routes(routes)
@@ -2775,7 +2574,7 @@ def cross_vehicle_move_once(
     for r in R_ids:
         routes.setdefault(int(r), [])
 
-    # ????????????????????????
+    # 基准：规范化一次
     routes = _normalize_ws_blocks(routes, evaluator)
     base_obj, _ = evaluator.evaluate(routes, shelf_seq, place)
     base_obj = float(base_obj)
@@ -2838,14 +2637,14 @@ def cross_vehicle_move_once(
         )
         if not cands:
             cands = [min(int(s) for s in evaluator.S)]
-        # ?????????
+        # 再截断
         if len(cands) > int(max_s_samples):
             head = cands[: int(max_s_samples)]
             tail = cands[int(max_s_samples):]
             if tail:
                 head.append(int(rng.choice(tail)))
             cands = head
-        # ??????
+        # 去重
         out, seen = [], set()
         for s in cands:
             s = int(s)
@@ -2854,10 +2653,10 @@ def cross_vehicle_move_once(
                 seen.add(s)
         return out
 
-    # ????????????(lb, cand_routes, cand_place)
+    # 候选池： (lb, cand_routes, cand_place)
     cand_pool: List[Tuple[float, Dict[int, List[int]], Dict[int, int]]] = []
 
-    # ========== 1) relocate ??????==========
+    # ========== 1) relocate 候选 ==========
     for _ in range(max(1, int(max_trials))):
         r_from = int(rng.choice(nonempty))
         r_to = int(rng.choice([r for r in R_ids if r != r_from]))
@@ -2887,7 +2686,7 @@ def cross_vehicle_move_once(
                     r=r_to,
                     pos=pos,
                     end_s=s,
-                    routes=routes,   # base routes?????????j???
+                    routes=routes,   # base routes（不含 j）
                     place=place,
                     used_tail_cells=used_tail,
                     strict_move1=False,
@@ -2902,14 +2701,14 @@ def cross_vehicle_move_once(
                 cand_place = _dc_place(place)
                 cand_place[j] = s
 
-                # ???????????????LB >= base_obj => ???????????????
+                # 安全剪枝：LB >= base_obj => 不可能改进
                 lb = proxy.solution_lb(routes=cand_routes, place=cand_place, stop_at=base_obj if math.isfinite(base_obj) else None)
                 if math.isfinite(base_obj) and lb >= base_obj - 1e-9:
                     continue
 
                 cand_pool.append((float(lb), cand_routes, cand_place))
 
-    # ========== 2) swap ??????==========
+    # ========== 2) swap 候选 ==========
     if try_swap and len(nonempty) >= 2:
         for _ in range(max(1, int(max_trials))):
             r1, r2 = rng.sample(nonempty, 2)
@@ -2967,12 +2766,12 @@ def cross_vehicle_move_once(
 
     cand_pool.sort(key=lambda x: x[0])
 
-    # ?????????????????????????????????????????????
+    # ★强制封顶，防止你外面忘记调参
     eval_k = min(max(1, int(max_evals)), 12, len(cand_pool))
 
     for i in range(eval_k):
         _, cand_routes, cand_place = cand_pool[i]
-        # cand_routes ?????????route-level normalize??????????????? normalize
+        # cand_routes 已保持 route-level normalize，无需全量 normalize
         obj, _ = evaluator.evaluate(cand_routes, shelf_seq, cand_place)
         obj = float(obj)
         if obj < base_obj - 1e-9:
@@ -2994,7 +2793,7 @@ def cross_vehicle_block_move_once(
     max_block: int = 2,
     max_trials: int = 2,
 ) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
-    """???????????????????????????1~2???"""
+    """跨车段块移动（长度 1~2）"""
     routes = _dc_routes(routes)
     place = _dc_place(place)
     routes_norm = _normalize_ws_blocks(routes, evaluator)
@@ -3024,7 +2823,7 @@ def cross_vehicle_block_move_once(
                 cand_routes[r_from] = rest_from
                 cand_routes[r_to] = cand_routes[r_to][:pos] + block + cand_routes[r_to][pos:]
 
-                # ???block ????????????????????????????????????
+                # 给 block 内任务一个合理初值回库位
                 for j in block:
                     cands = _cand_end_shelves_for_task(
                         int(j),
@@ -3057,7 +2856,7 @@ def intra_two_opt_once(
     rng: random.Random,
     max_trials: int = 2,
 ) -> Tuple[Dict[int, List[int]], bool, float]:
-    """?????? 2-opt??????????????????????????????????????????????????????"""
+    """车内 2-opt：随机选一车，反转一段，若改善则返回"""
     routes = _dc_routes(routes)
     routes_norm = _normalize_ws_blocks(routes, evaluator)
     base_obj, _ = evaluator.evaluate(routes_norm, shelf_seq, place)
@@ -3093,7 +2892,7 @@ def intra_or_opt_once(
     max_trials: int = 2,
     max_block: int = 2,
 ) -> Tuple[Dict[int, List[int]], bool, float]:
-    """?????? Or-opt???????????? k(1/2) ???????????????????????????????????????????????????"""
+    """车内 Or-opt：取长度 k(1/2) 的连续块在同车内重插，若改善则返回"""
     routes = _dc_routes(routes)
     routes_norm = _normalize_ws_blocks(routes, evaluator)
     base_obj, _ = evaluator.evaluate(routes_norm, shelf_seq, place)
@@ -3137,7 +2936,7 @@ def intensify_critical_tail_once(
     shelf_init_override: Optional[Dict[int, int]],
     tail_k: int = 2,
 ) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
-    """?????????????????????????????????????????? Cmax"""
+    """瓶颈车末尾任务尝试移走，改善 Cmax"""
     routes = _dc_routes(routes)
     place = _dc_place(place)
     routes_norm = _normalize_ws_blocks(routes, evaluator)
@@ -3174,7 +2973,7 @@ def intensify_critical_tail_once(
                 cand_routes[best_r] = [x for x in cand_routes[best_r] if int(x) != int(j)]
                 cand_routes[r_to].insert(pos, int(j))
 
-                # ???j ?????????????????????
+                # 给 j 一个合理回库位
                 cands = _cand_end_shelves_for_task(
                     int(j),
                     place=cand_place,
@@ -3211,12 +3010,12 @@ def cross_vehicle_2opt_star_once(
     evaluator: RobustEvaluator,
     rng: random.Random,
     max_trials: int = 12,
-    allow_non_improving: bool = False,  # ???shake ???????????????????????????
+    allow_non_improving: bool = False,  # ★shake 模式：允许非改进解
 ) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
     """
-    ?????????2-opt*??????????????????????????????????????????????????????????????????????????????
-    - allow_non_improving=False?????????????????????????????????????????????
-    - allow_non_improving=True ????????????????????????????????????????????????????????????????????? SA ?????????
+    跨两车 2-opt*：随机选两辆车，在各自路线随机切一刀，交换“尾段”。
+    - allow_non_improving=False：只返回改进解（否则返回原解）
+    - allow_non_improving=True ：返回试验中目标最小的那条（即便不比原来好，让 SA 决定）
     """
     routes = _dc_routes(routes)
     place = _dc_place(place)
@@ -3268,9 +3067,9 @@ def cross_vehicle_2opt_star_once(
 
 class AdaptiveOpPool:
     """
-    ALNS ???????????????????????????
-      - roulette wheel ??????
-      - segment-based ???????????????w = (1-r)*w + r*(avg_score)
+    ALNS 自适应算子权重池：
+      - roulette wheel 选择
+      - segment-based 权重更新：w = (1-r)*w + r*(avg_score)
     """
     def __init__(
         self,
@@ -3295,7 +3094,7 @@ class AdaptiveOpPool:
     def pick(self, rng: random.Random, candidates: List[str]) -> str:
         cand = [c for c in candidates if c in self.w]
         if not cand:
-            # ?????????????????????
+            # 防御：不该发生
             return str(rng.choice(self.names))
 
         total = 0.0
@@ -3340,1096 +3139,6 @@ class AdaptiveOpPool:
         items = sorted(((n, float(self.w[n])) for n in self.names), key=lambda x: x[1], reverse=True)
         return items[: max(1, int(k))]
 
-def _flatten_route_order(routes: Dict[int, List[int]], all_tasks: List[int]) -> List[int]:
-    seen: Set[int] = set()
-    out: List[int] = []
-    for r in sorted(routes.keys()):
-        for j in (routes.get(r, []) or []):
-            jj = int(j)
-            if (jj in seen) or (jj not in all_tasks):
-                continue
-            seen.add(jj)
-            out.append(jj)
-    for j in all_tasks:
-        if j not in seen:
-            out.append(int(j))
-    return out
-
-def _flatten_ws_fixed_order(evaluator: RobustEvaluator, all_tasks: List[int]) -> List[int]:
-    ws_fixed = getattr(evaluator, "ws_fixed_seq", {}) or {}
-    keep = set(int(x) for x in all_tasks)
-    seen: Set[int] = set()
-    out: List[int] = []
-    for ws in sorted(ws_fixed.keys()):
-        for j in (ws_fixed.get(ws, []) or []):
-            jj = int(j)
-            if (jj in keep) and (jj not in seen):
-                seen.add(jj)
-                out.append(jj)
-    for j in all_tasks:
-        if j not in seen:
-            out.append(int(j))
-    return out
-
-def _construct_strong_initial_solution(
-    init,
-    *,
-    evaluator: RobustEvaluator,
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]],
-    shelf_init: Optional[Dict[int, int]],
-    seed: int,
-    max_tries: int = 4,
-    time_budget_sec: float = 6.0,
-    only_when_infeasible: bool = True,
-    require_feasible: bool = False,
-):
-    """
-    Strong constructor for from-scratch feasibility.
-    If require_feasible=True, use a more exhaustive construction strategy.
-    """
-    base = copy.deepcopy(init)
-    base.routes = _dc_routes(base.routes)
-    base.place = _dc_place(base.place)
-    base.shelf_seq = _dc_shelf_seq(base.shelf_seq)
-    base.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        base.shelf_seq,
-        evaluator=evaluator,
-        task_shelf_mapping=task_shelf_mapping,
-    )
-    base.routes = _normalize_ws_blocks(base.routes, evaluator)
-    base.routes = normalize_routes_by_shelf_seq_order(base.routes, base.shelf_seq, task_shelf_mapping)
-
-    base_obj, base_det = _safe_evaluate(evaluator, base.routes, base.shelf_seq, base.place)
-    base_key = _safe_infeas_key(base_det, evaluator, obj=base_obj)
-    if only_when_infeasible and tuple(base_key) == (0, 0, 0):
-        return base
-
-    all_tasks = sorted(int(j) for j in evaluator.J)
-    if not all_tasks:
-        return base
-
-    rng = random.Random(int(seed) + 2027)
-    t0 = time.perf_counter()
-    t_budget = max(0.0, float(time_budget_sec))
-
-    route_order = _flatten_route_order(base.routes, all_tasks)
-    ws_order = _flatten_ws_fixed_order(evaluator, all_tasks)
-    dur_order = sorted(all_tasks, key=lambda j: float(getattr(evaluator, "D", {}).get(int(j), 0.0)), reverse=True)
-    rnd_order = list(all_tasks)
-    rng.shuffle(rnd_order)
-
-    strategy_orders = [ws_order, dur_order, route_order, rnd_order]
-    local_best = base
-    local_best_obj = float(base_obj)
-    local_best_key = tuple(base_key)
-    feas_best = copy.deepcopy(base) if tuple(base_key) == (0, 0, 0) else None
-    feas_best_obj = float(base_obj) if tuple(base_key) == (0, 0, 0) else float("inf")
-
-    R_ids = sorted(int(r) for r in evaluator.R)
-    tries = max(1, int(max_tries))
-
-    def _time_up() -> bool:
-        return (t_budget > 0.0) and ((time.perf_counter() - t0) >= t_budget)
-
-    # Stage A: strict ordered reconstruction.
-    for k in range(tries):
-        if _time_up():
-            break
-        order = list(strategy_orders[k % len(strategy_orders)])
-        if k >= len(strategy_orders):
-            rng.shuffle(order)
-
-        routes0 = {int(r): [] for r in R_ids}
-        place0: Dict[int, int] = {}
-
-        if require_feasible:
-            per_task_eval = 36 if k == 0 else 28
-            total_eval = max(1400, 520 + 120 * len(R_ids))
-            place_try = 14
-            extra_shelves = 10
-            force_all = True
-            strict_brute = True
-        else:
-            per_task_eval = 22 if k == 0 else 16
-            total_eval = max(320, 180 + 40 * len(R_ids))
-            place_try = 10
-            extra_shelves = 3
-            force_all = bool(k % 2 == 1)
-            strict_brute = False
-
-        try:
-            routes_c, place_c = repair_greedy_insert_with_place_ordered(
-                routes=routes0,
-                shelf_seq=base.shelf_seq,
-                place=place0,
-                evaluator=evaluator,
-                removed_order=order,
-                rng=rng,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init_override=shelf_init,
-                max_place_try_each=place_try,
-                top_k_random=1,
-                extra_random_shelves=extra_shelves,
-                force_all_shelves=force_all,
-                max_agv_candidates=None,
-                max_pos_per_route=None,
-                max_evals_per_task=per_task_eval,
-                max_evals_total=total_eval,
-                strict_construct=True,
-                strict_bruteforce_fallback=strict_brute,
-            )
-        except Exception:
-            continue
-
-        routes_c = _normalize_ws_blocks(routes_c, evaluator)
-        routes_c = normalize_routes_by_shelf_seq_order(routes_c, base.shelf_seq, task_shelf_mapping)
-        obj_c, det_c = _safe_evaluate(evaluator, routes_c, base.shelf_seq, place_c)
-        key_c = _safe_infeas_key(det_c, evaluator, obj=obj_c)
-
-        cand = copy.deepcopy(base)
-        cand.routes = routes_c
-        cand.place = place_c
-        cand.shelf_seq = _dc_shelf_seq(base.shelf_seq)
-
-        if tuple(key_c) == (0, 0, 0) and float(obj_c) < float(feas_best_obj) - 1e-9:
-            feas_best = cand
-            feas_best_obj = float(obj_c)
-        if (tuple(key_c) < tuple(local_best_key)) or (tuple(key_c) == tuple(local_best_key) and float(obj_c) < float(local_best_obj) - 1e-9):
-            local_best = cand
-            local_best_obj = float(obj_c)
-            local_best_key = tuple(key_c)
-        if tuple(key_c) == (0, 0, 0):
-            return cand
-
-    # Stage B: broad fallback reconstruction.
-    if tuple(local_best_key) != (0, 0, 0):
-        b_tries = 3 if (not require_feasible) else max(6, tries)
-        for _ in range(b_tries):
-            if _time_up():
-                break
-            order = list(ws_order)
-            rng.shuffle(order)
-            routes0 = {int(r): [] for r in R_ids}
-            place0: Dict[int, int] = {}
-            try:
-                routes_c, place_c = repair_greedy_insert_with_place_ordered(
-                    routes=routes0,
-                    shelf_seq=base.shelf_seq,
-                    place=place0,
-                    evaluator=evaluator,
-                    removed_order=order,
-                    rng=rng,
-                    S_near_by_j=S_near_by_j,
-                    task_shelf_mapping=task_shelf_mapping,
-                    shelf_init_override=shelf_init,
-                    max_place_try_each=12,
-                    top_k_random=1,
-                    extra_random_shelves=(12 if require_feasible else 6),
-                    force_all_shelves=True,
-                    max_agv_candidates=None,
-                    max_pos_per_route=None,
-                    max_evals_per_task=(40 if require_feasible else 26),
-                    max_evals_total=max((2200 if require_feasible else 500), 240 + 60 * len(R_ids)),
-                    strict_construct=bool(require_feasible),
-                    strict_bruteforce_fallback=bool(require_feasible),
-                )
-            except Exception:
-                continue
-
-            routes_c = _normalize_ws_blocks(routes_c, evaluator)
-            routes_c = normalize_routes_by_shelf_seq_order(routes_c, base.shelf_seq, task_shelf_mapping)
-            obj_c, det_c = _safe_evaluate(evaluator, routes_c, base.shelf_seq, place_c)
-            key_c = _safe_infeas_key(det_c, evaluator, obj=obj_c)
-
-            cand = copy.deepcopy(base)
-            cand.routes = routes_c
-            cand.place = place_c
-            cand.shelf_seq = _dc_shelf_seq(base.shelf_seq)
-            if tuple(key_c) == (0, 0, 0) and float(obj_c) < float(feas_best_obj) - 1e-9:
-                feas_best = cand
-                feas_best_obj = float(obj_c)
-            if (tuple(key_c) < tuple(local_best_key)) or (tuple(key_c) == tuple(local_best_key) and float(obj_c) < float(local_best_obj) - 1e-9):
-                local_best = cand
-                local_best_obj = float(obj_c)
-                local_best_key = tuple(key_c)
-            if tuple(key_c) == (0, 0, 0):
-                return cand
-
-    # Stage C: exhaustive restarts if feasibility is mandatory.
-    if require_feasible and tuple(local_best_key) != (0, 0, 0):
-        c_tries = max(8, 2 * tries)
-        for k in range(c_tries):
-            if _time_up():
-                break
-            order = list(all_tasks)
-            if (k % 2) == 0:
-                rng.shuffle(order)
-            else:
-                order.sort(key=lambda jj: (float(getattr(evaluator, "D", {}).get(int(jj), 0.0)), rng.random()), reverse=True)
-
-            routes0 = {int(r): [] for r in R_ids}
-            place0: Dict[int, int] = {}
-            try:
-                routes_c, place_c = repair_greedy_insert_with_place_ordered(
-                    routes=routes0,
-                    shelf_seq=base.shelf_seq,
-                    place=place0,
-                    evaluator=evaluator,
-                    removed_order=order,
-                    rng=rng,
-                    S_near_by_j=S_near_by_j,
-                    task_shelf_mapping=task_shelf_mapping,
-                    shelf_init_override=shelf_init,
-                    max_place_try_each=16,
-                    top_k_random=1,
-                    extra_random_shelves=16,
-                    force_all_shelves=True,
-                    max_agv_candidates=None,
-                    max_pos_per_route=None,
-                    max_evals_per_task=48,
-                    max_evals_total=max(3200, 800 + 160 * len(R_ids)),
-                    strict_construct=True,
-                    strict_bruteforce_fallback=True,
-                )
-            except Exception:
-                continue
-
-            routes_c = _normalize_ws_blocks(routes_c, evaluator)
-            routes_c = normalize_routes_by_shelf_seq_order(routes_c, base.shelf_seq, task_shelf_mapping)
-            obj_c, det_c = _safe_evaluate(evaluator, routes_c, base.shelf_seq, place_c)
-            key_c = _safe_infeas_key(det_c, evaluator, obj=obj_c)
-
-            cand = copy.deepcopy(base)
-            cand.routes = routes_c
-            cand.place = place_c
-            cand.shelf_seq = _dc_shelf_seq(base.shelf_seq)
-            if tuple(key_c) == (0, 0, 0):
-                return cand
-            if (tuple(key_c) < tuple(local_best_key)) or (tuple(key_c) == tuple(local_best_key) and float(obj_c) < float(local_best_obj) - 1e-9):
-                local_best = cand
-                local_best_obj = float(obj_c)
-                local_best_key = tuple(key_c)
-
-    if feas_best is not None:
-        return feas_best
-    return local_best
-
-
-def build_feasible_initial_solution(
-    init,
-    *,
-    evaluator: RobustEvaluator,
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-    shelf_init: Optional[Dict[int, int]] = None,
-    seed: int = 0,
-    rounds: int = 6,
-    round_time_budget_sec: float = 20.0,
-):
-    """
-    No-history feasible initializer.
-    Repeatedly runs aggressive strong-constructor rounds until a feasible solution is found.
-    """
-    best = copy.deepcopy(init)
-    best.routes = _dc_routes(best.routes)
-    best.place = _dc_place(best.place)
-    best.shelf_seq = _dc_shelf_seq(best.shelf_seq)
-
-    best_obj, best_det = _safe_evaluate(evaluator, best.routes, best.shelf_seq, best.place)
-    best_key = _safe_infeas_key(best_det, evaluator, obj=best_obj)
-    if tuple(best_key) == (0, 0, 0):
-        return best
-
-    cur = copy.deepcopy(best)
-    tries = max(1, int(rounds))
-    for k in range(tries):
-        cand = _construct_strong_initial_solution(
-            cur,
-            evaluator=evaluator,
-            S_near_by_j=S_near_by_j,
-            task_shelf_mapping=task_shelf_mapping,
-            shelf_init=shelf_init,
-            seed=int(seed) + 104729 * int(k + 1),
-            max_tries=6 + (k // 2),
-            time_budget_sec=float(round_time_budget_sec),
-            only_when_infeasible=False,
-            require_feasible=True,
-        )
-        cand.routes = _normalize_ws_blocks(_dc_routes(cand.routes), evaluator)
-        cand.routes = normalize_routes_by_shelf_seq_order(cand.routes, cand.shelf_seq, task_shelf_mapping)
-        obj_c, det_c = _safe_evaluate(evaluator, cand.routes, cand.shelf_seq, cand.place)
-        key_c = _safe_infeas_key(det_c, evaluator, obj=obj_c)
-
-        if tuple(key_c) == (0, 0, 0):
-            return cand
-
-        # If still infeasible, run a short repair ALNS on exact evaluator.
-        repair_budget = max(8.0, 0.6 * float(round_time_budget_sec))
-        cand_repair = alns_minimize(
-            init=cand,
-            evaluator=evaluator,
-            iters=max(180, 60 + 20 * (k + 1)),
-            start_T=1.1,
-            cool=0.997,
-            S_near_by_j=S_near_by_j,
-            seed=int(seed) + 8191 * int(k + 1),
-            task_shelf_mapping=task_shelf_mapping,
-            enable_place_tune=True,
-            enable_shelf_tune=True,
-            shelf_init=shelf_init,
-            speed_profile="balanced",
-            feasible_first=False,
-            enable_strong_init=False,
-            time_budget_sec=float(repair_budget),
-            relabel_interval=20,
-            relabel_eval_top_k=10,
-        )
-        cand_repair.routes = _normalize_ws_blocks(_dc_routes(cand_repair.routes), evaluator)
-        cand_repair.routes = normalize_routes_by_shelf_seq_order(cand_repair.routes, cand_repair.shelf_seq, task_shelf_mapping)
-        obj_r, det_r = _safe_evaluate(evaluator, cand_repair.routes, cand_repair.shelf_seq, cand_repair.place)
-        key_r = _safe_infeas_key(det_r, evaluator, obj=obj_r)
-        if tuple(key_r) == (0, 0, 0):
-            return cand_repair
-
-        if (tuple(key_c) < tuple(best_key)) or (tuple(key_c) == tuple(best_key) and float(obj_c) < float(best_obj) - 1e-9):
-            best = cand
-            best_key = tuple(key_c)
-            best_obj = float(obj_c)
-        if (tuple(key_r) < tuple(best_key)) or (tuple(key_r) == tuple(best_key) and float(obj_r) < float(best_obj) - 1e-9):
-            best = cand_repair
-            best_key = tuple(key_r)
-            best_obj = float(obj_r)
-
-        cur = cand_repair if tuple(key_r) <= tuple(key_c) else cand
-
-    return best
-
-
-def build_exact_feasible_seed(
-    init,
-    *,
-    evaluator_partial_hard: RobustEvaluator,
-    evaluator_exact: RobustEvaluator,
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-    shelf_init: Optional[Dict[int, int]] = None,
-    seed: int = 0,
-    attempts: int = 4,
-    time_budget_sec: float = 14.0,
-    per_attempt_eval_budget: int = 2800,
-):
-    """
-    Pure from-scratch exact-feasibility driven constructor.
-    Build with hard constraints while allowing incompleteness during insertion,
-    then validate against exact hard evaluator.
-    """
-    base = copy.deepcopy(init)
-    base.routes = _dc_routes(base.routes)
-    base.place = _dc_place(base.place)
-    base.shelf_seq = _dc_shelf_seq(base.shelf_seq)
-
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-    base.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        base.shelf_seq,
-        evaluator=evaluator_partial_hard,
-        task_shelf_mapping=clean_map,
-    )
-    base.routes = _normalize_ws_blocks(base.routes, evaluator_partial_hard)
-    base.routes = normalize_routes_by_shelf_seq_order(base.routes, base.shelf_seq, clean_map)
-
-    key_feas = (0, 0, 0)
-    best_obj, best_det = _safe_evaluate(evaluator_exact, base.routes, base.shelf_seq, base.place)
-    best_key = _safe_infeas_key(best_det, evaluator_exact, obj=best_obj)
-    best_sol = copy.deepcopy(base)
-    if tuple(best_key) == key_feas:
-        return best_sol
-
-    all_tasks = sorted(int(j) for j in evaluator_partial_hard.J)
-    if not all_tasks:
-        return best_sol
-
-    chain_seen: Set[int] = set()
-    chain_order: List[int] = []
-    for c in sorted(base.shelf_seq.keys()):
-        for j in (base.shelf_seq.get(int(c), []) or []):
-            jj = int(j)
-            if (jj in all_tasks) and (jj not in chain_seen):
-                chain_seen.add(jj)
-                chain_order.append(jj)
-    for j in all_tasks:
-        if int(j) not in chain_seen:
-            chain_order.append(int(j))
-
-    rng = random.Random(int(seed) + 7331)
-    t0 = time.perf_counter()
-    t_budget = max(0.0, float(time_budget_sec))
-    R_ids = sorted(int(r) for r in evaluator_partial_hard.R)
-    if not R_ids:
-        return best_sol
-
-    ws_order = _flatten_ws_fixed_order(evaluator_partial_hard, all_tasks)
-    dur_order = sorted(all_tasks, key=lambda j: float(getattr(evaluator_partial_hard, "D", {}).get(int(j), 0.0)), reverse=True)
-    route_order = _flatten_route_order(base.routes, all_tasks)
-    order_bank = [chain_order, ws_order, dur_order, route_order]
-
-    tries = max(1, int(attempts))
-    for k in range(tries):
-        if (t_budget > 0.0) and ((time.perf_counter() - t0) >= t_budget):
-            break
-
-        order = list(order_bank[k % len(order_bank)])
-        if k >= len(order_bank):
-            rng.shuffle(order)
-        if (k % 3) == 2:
-            order.sort(
-                key=lambda j: (
-                    float(getattr(evaluator_partial_hard, "D", {}).get(int(j), 0.0)),
-                    rng.random(),
-                ),
-                reverse=True,
-            )
-
-        routes0 = {int(r): [] for r in R_ids}
-        place0: Dict[int, int] = {}
-
-        eval_budget = max(1000, int(float(per_attempt_eval_budget) * (1.0 + 0.35 * float(k))))
-        eval_per_task = max(20, min(96, int(eval_budget // max(1, len(all_tasks) // 2))))
-        extra_shelves = 8 + min(8, k)
-        place_try = 12 + min(6, k)
-
-        try:
-            routes_c, place_c = repair_greedy_insert_with_place_ordered(
-                routes=routes0,
-                shelf_seq=base.shelf_seq,
-                place=place0,
-                evaluator=evaluator_partial_hard,
-                removed_order=order,
-                rng=rng,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=clean_map,
-                shelf_init_override=shelf_init,
-                max_place_try_each=place_try,
-                top_k_random=1,
-                extra_random_shelves=extra_shelves,
-                force_all_shelves=True,
-                max_agv_candidates=None,
-                max_pos_per_route=None,
-                max_evals_per_task=eval_per_task,
-                max_evals_total=eval_budget,
-                strict_construct=True,
-                strict_bruteforce_fallback=True,
-                require_finite_eval=True,
-                eval_fail_cost=1e30,
-            )
-        except Exception:
-            continue
-
-        routes_c = _normalize_ws_blocks(routes_c, evaluator_partial_hard)
-        routes_c = normalize_routes_by_shelf_seq_order(routes_c, base.shelf_seq, clean_map)
-        obj_c, det_c = _safe_evaluate(evaluator_exact, routes_c, base.shelf_seq, place_c)
-        key_c = _safe_infeas_key(det_c, evaluator_exact, obj=obj_c)
-
-        cand = copy.deepcopy(base)
-        cand.routes = routes_c
-        cand.place = place_c
-        cand.shelf_seq = _dc_shelf_seq(base.shelf_seq)
-
-        if tuple(key_c) == key_feas:
-            return cand
-
-        if (tuple(key_c) < tuple(best_key)) or (tuple(key_c) == tuple(best_key) and float(obj_c) < float(best_obj) - 1e-9):
-            best_sol = cand
-            best_key = tuple(key_c)
-            best_obj = float(obj_c)
-
-    return best_sol
-
-
-def build_full_coverage_seed(
-    init,
-    *,
-    evaluator: RobustEvaluator,
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-    shelf_init: Optional[Dict[int, int]] = None,
-    seed: int = 0,
-):
-    """
-    Fast no-history constructor:
-    build a full-coverage seed (all tasks scheduled exactly once) with deterministic rules.
-    """
-    out = copy.deepcopy(init)
-    out.shelf_seq = _dc_shelf_seq(getattr(out, "shelf_seq", {}) or {})
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-    out.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        out.shelf_seq,
-        evaluator=evaluator,
-        task_shelf_mapping=clean_map,
-    )
-    chain_of = _build_chain_of_map(out.shelf_seq, clean_map)
-
-    R_ids = sorted(int(r) for r in evaluator.R)
-    routes: Dict[int, List[int]] = {int(r): [] for r in R_ids}
-    place: Dict[int, int] = {}
-    if not R_ids:
-        out.routes = routes
-        out.place = place
-        return out
-
-    all_tasks = sorted(int(j) for j in evaluator.J)
-    task_order = _flatten_ws_fixed_order(evaluator, all_tasks)
-    D = getattr(evaluator, "D", {}) or {}
-    loads: Dict[int, float] = {int(r): 0.0 for r in R_ids}
-
-    rng = random.Random(int(seed) + 4099)
-    pi = getattr(evaluator, "pi", {}) or {}
-
-    # predecessor on chain from shelf_seq
-    pred_on_chain: Dict[int, int] = {}
-    for c, seq in (out.shelf_seq or {}).items():
-        arr = [int(x) for x in (seq or [])]
-        for i in range(1, len(arr)):
-            pred_on_chain[int(arr[i])] = int(arr[i - 1])
-
-    all_cells_sorted = sorted(int(s) for s in evaluator.S)
-    shelf_init_map = shelf_init if shelf_init is not None else (getattr(evaluator, "shelf_init", {}) or {})
-
-    for j in task_order:
-        jj = int(j)
-        wsj = int(pi.get(jj, -1))
-
-        # choose AGV by load, tie-break by route length and id.
-        agv_rank = sorted(
-            R_ids,
-            key=lambda rr: (
-                float(loads.get(int(rr), 0.0)),
-                len(routes.get(int(rr), [])),
-                int(rr),
-            ),
-        )
-        r_pick = int(agv_rank[0])
-        routes[r_pick].append(jj)
-        loads[r_pick] = float(loads.get(r_pick, 0.0)) + float(D.get(jj, 0.0))
-
-        cand_cells = _cand_end_shelves_for_task(
-            jj,
-            place=place,
-            S_near_by_j=S_near_by_j,
-            evaluator=evaluator,
-            shelf_seq=out.shelf_seq,
-            task_shelf_mapping=clean_map,
-            shelf_init_override=shelf_init_map,
-            must_include_prev_or_init=True,
-            max_keep=10,
-        )
-
-        # deterministic priority: predecessor cell > shelf_init cell > nearest candidates > all cells.
-        pri: List[int] = []
-        prev_j = pred_on_chain.get(jj, None)
-        if prev_j is not None and int(prev_j) in place:
-            pri.append(int(place[int(prev_j)]))
-
-        cc = int(chain_of.get(jj, -1))
-        if cc in shelf_init_map:
-            try:
-                pri.append(int(shelf_init_map[cc]))
-            except Exception:
-                pass
-
-        if jj in getattr(out, "place", {}):
-            try:
-                pri.append(int(out.place[jj]))
-            except Exception:
-                pass
-
-        for s in cand_cells:
-            pri.append(int(s))
-        for s in all_cells_sorted:
-            pri.append(int(s))
-
-        seen: Set[int] = set()
-        ordered_cells: List[int] = []
-        for s in pri:
-            if s not in seen:
-                seen.add(s)
-                ordered_cells.append(int(s))
-
-        # light randomization for tie diversification while preserving priority chunks.
-        if len(ordered_cells) > 4:
-            head = ordered_cells[:3]
-            tail = ordered_cells[3:]
-            rng.shuffle(tail)
-            ordered_cells = head + tail
-
-        place[jj] = int(ordered_cells[0]) if ordered_cells else int(all_cells_sorted[0])
-
-    routes = _normalize_ws_blocks(routes, evaluator)
-    routes = normalize_routes_by_shelf_seq_order(routes, out.shelf_seq, clean_map)
-
-    out.routes = routes
-    out.place = place
-    return out
-
-
-def build_ws_round_robin_seed(
-    init,
-    *,
-    evaluator: RobustEvaluator,
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-):
-    """
-    Deterministic from-scratch seed:
-      1) task order follows ws_fixed_seq
-      2) assign tasks round-robin to AGVs
-      3) place each task back to its chain's initial shelf cell
-    """
-    out = copy.deepcopy(init)
-    out.routes = _dc_routes(getattr(out, "routes", {}) or {})
-    out.place = _dc_place(getattr(out, "place", {}) or {})
-    out.shelf_seq = _dc_shelf_seq(getattr(out, "shelf_seq", {}) or {})
-
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-    out.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        out.shelf_seq,
-        evaluator=evaluator,
-        task_shelf_mapping=clean_map,
-    )
-
-    all_tasks = sorted(int(j) for j in evaluator.J)
-    if not all_tasks:
-        return out
-    R_ids = sorted(int(r) for r in evaluator.R)
-    if not R_ids:
-        return out
-
-    ws_order = _flatten_ws_fixed_order(evaluator, all_tasks)
-    routes: Dict[int, List[int]] = {int(r): [] for r in R_ids}
-    for idx, j in enumerate(ws_order):
-        rr = int(R_ids[int(idx) % len(R_ids)])
-        routes[rr].append(int(j))
-
-    # Keep shelf_seq consistent with ws order to reduce chain/dispatch deadlocks.
-    ws_pos = _ws_index(getattr(evaluator, "ws_fixed_seq", {}) or {})
-    pi_map = getattr(evaluator, "pi", {}) or {}
-    for c in sorted(out.shelf_seq.keys()):
-        seq = [int(x) for x in (out.shelf_seq.get(int(c), []) or [])]
-        seq.sort(key=lambda j: (
-            int(pi_map.get(int(j), 10**9)),
-            int(ws_pos.get(int(pi_map.get(int(j), -1)), {}).get(int(j), 10**9)),
-            int(j),
-        ))
-        out.shelf_seq[int(c)] = seq
-
-    # Place each task to its chain home cell whenever available.
-    chain_of = _build_chain_of_map(out.shelf_seq, clean_map)
-    shelf_init_map = getattr(evaluator, "shelf_init", {}) or {}
-    fallback_cell = min(int(s) for s in evaluator.S) if getattr(evaluator, "S", None) else 0
-    place: Dict[int, int] = {}
-    for j in all_tasks:
-        jj = int(j)
-        c = int(chain_of.get(jj, clean_map.get(jj, -1)))
-        if c in shelf_init_map:
-            place[jj] = int(shelf_init_map[int(c)])
-        elif jj in out.place:
-            place[jj] = int(out.place[jj])
-        else:
-            place[jj] = int(fallback_cell)
-
-    routes = _normalize_ws_blocks(routes, evaluator)
-    routes = normalize_routes_by_shelf_seq_order(routes, out.shelf_seq, clean_map)
-    out.routes = routes
-    out.place = place
-    return out
-
-
-def build_safe_chain_ws_seed(
-    init,
-    *,
-    evaluator_exact: RobustEvaluator,
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-    shelf_init: Optional[Dict[int, int]] = None,
-    seed: int = 0,
-    tries: int = 80,
-):
-    """
-    Deterministic-feasibility fallback:
-      1) build a precedence topo order from (ws_fixed_seq + shelf_seq chain order)
-      2) assign all tasks to one AGV in topo order
-      3) try multiple placement assignments and keep the first exact-feasible one
-    """
-    out = copy.deepcopy(init)
-    out.routes = _dc_routes(getattr(out, "routes", {}) or {})
-    out.place = _dc_place(getattr(out, "place", {}) or {})
-    out.shelf_seq = _dc_shelf_seq(getattr(out, "shelf_seq", {}) or {})
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-    out.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        out.shelf_seq,
-        evaluator=evaluator_exact,
-        task_shelf_mapping=clean_map,
-    )
-    # Reorder each shelf chain to be more consistent with WS fixed order,
-    # reducing precedence-cycle risk in the fallback seed.
-    ws_pos = _ws_index(getattr(evaluator_exact, "ws_fixed_seq", {}) or {})
-    pi = getattr(evaluator_exact, "pi", {}) or {}
-    shelf_seq_adj: Dict[int, List[int]] = _dc_shelf_seq(out.shelf_seq)
-    for c in sorted(shelf_seq_adj.keys()):
-        seq = [int(x) for x in (shelf_seq_adj.get(int(c), []) or [])]
-        tagged = list(enumerate(seq))
-        tagged.sort(
-            key=lambda it: (
-                int(pi.get(int(it[1]), 10**9)),
-                int(ws_pos.get(int(pi.get(int(it[1]), -1)), {}).get(int(it[1]), 10**9)),
-                int(it[0]),
-            )
-        )
-        shelf_seq_adj[int(c)] = [int(j) for _, j in tagged]
-    out.shelf_seq = shelf_seq_adj
-
-    tasks = sorted(int(j) for j in evaluator_exact.J)
-    if not tasks:
-        return out
-    task_set = set(tasks)
-
-    succ: Dict[int, Set[int]] = defaultdict(set)
-    indeg: Dict[int, int] = {int(j): 0 for j in tasks}
-
-    def _add_edge(a: int, b: int) -> None:
-        aa = int(a)
-        bb = int(b)
-        if (aa not in task_set) or (bb not in task_set) or (aa == bb):
-            return
-        if bb in succ[aa]:
-            return
-        succ[aa].add(bb)
-        indeg[bb] = int(indeg.get(bb, 0)) + 1
-
-    ws_fixed = getattr(evaluator_exact, "ws_fixed_seq", {}) or {}
-    for ws in sorted(ws_fixed.keys()):
-        seq = [int(x) for x in (ws_fixed.get(ws, []) or []) if int(x) in task_set]
-        for i in range(1, len(seq)):
-            _add_edge(int(seq[i - 1]), int(seq[i]))
-
-    for c in sorted(out.shelf_seq.keys()):
-        seq = [int(x) for x in (out.shelf_seq.get(c, []) or []) if int(x) in task_set]
-        for i in range(1, len(seq)):
-            _add_edge(int(seq[i - 1]), int(seq[i]))
-
-    rng = random.Random(int(seed) + 19001)
-    q = [int(j) for j in tasks if int(indeg.get(int(j), 0)) == 0]
-    q.sort()
-    topo: List[int] = []
-    while q:
-        j = int(q.pop(0))
-        topo.append(int(j))
-        nxt = sorted(int(x) for x in succ.get(int(j), set()))
-        for v in nxt:
-            indeg[v] = int(indeg.get(v, 0)) - 1
-            if int(indeg[v]) == 0:
-                q.append(int(v))
-        q.sort()
-    if len(topo) != len(tasks):
-        # Cycle fallback: keep ws-first order to stay deterministic.
-        topo = _flatten_ws_fixed_order(evaluator_exact, tasks)
-
-    R_ids = sorted(int(r) for r in evaluator_exact.R)
-    if not R_ids:
-        return out
-    lead_r = int(R_ids[0])
-    routes_template: Dict[int, List[int]] = {int(r): [] for r in R_ids}
-    routes_template[lead_r] = list(topo)
-    routes_template = _normalize_ws_blocks(routes_template, evaluator_exact)
-    routes_template = normalize_routes_by_shelf_seq_order(routes_template, out.shelf_seq, clean_map)
-
-    all_cells = sorted(int(s) for s in evaluator_exact.S)
-    if not all_cells:
-        out.routes = routes_template
-        out.place = {}
-        return out
-
-    tail_tasks: List[int] = []
-    for c in sorted(out.shelf_seq.keys()):
-        seq = [int(x) for x in (out.shelf_seq.get(c, []) or []) if int(x) in task_set]
-        if seq:
-            tail_tasks.append(int(seq[-1]))
-    tail_set = set(int(x) for x in tail_tasks)
-
-    base_place: Dict[int, int] = {}
-    used_tail_cells: Set[int] = set()
-    for j in tail_tasks:
-        cands = _cand_end_shelves_for_task(
-            int(j),
-            place=base_place,
-            S_near_by_j=S_near_by_j,
-            evaluator=evaluator_exact,
-            shelf_seq=out.shelf_seq,
-            task_shelf_mapping=clean_map,
-            shelf_init_override=shelf_init,
-            must_include_prev_or_init=True,
-            max_keep=20,
-        )
-        if not cands:
-            cands = list(all_cells)
-        pick = None
-        for s in cands:
-            ss = int(s)
-            if ss not in used_tail_cells:
-                pick = int(ss)
-                break
-        if pick is None:
-            pick = int(cands[0]) if cands else int(all_cells[0])
-        base_place[int(j)] = int(pick)
-        used_tail_cells.add(int(pick))
-
-    best_sol = copy.deepcopy(out)
-    best_obj = float("inf")
-    best_key = (10**9, 1, 10**12)
-
-    n_tries = max(1, int(tries))
-    for k in range(n_tries):
-        place_try: Dict[int, int] = dict(base_place)
-        for j in topo:
-            jj = int(j)
-            if jj in tail_set:
-                continue
-            cands = _cand_end_shelves_for_task(
-                jj,
-                place=place_try,
-                S_near_by_j=S_near_by_j,
-                evaluator=evaluator_exact,
-                shelf_seq=out.shelf_seq,
-                task_shelf_mapping=clean_map,
-                shelf_init_override=shelf_init,
-                must_include_prev_or_init=True,
-                max_keep=12,
-            )
-            if not cands:
-                cands = list(all_cells)
-            if k == 0:
-                pick_s = int(cands[0])
-            else:
-                topk = cands[: min(len(cands), 4)]
-                pick_s = int(rng.choice(topk if topk else cands))
-            place_try[jj] = int(pick_s)
-
-        routes_try = _dc_routes(routes_template)
-        obj_try, det_try = _safe_evaluate(evaluator_exact, routes_try, out.shelf_seq, place_try)
-        key_try = _safe_infeas_key(det_try, evaluator_exact, obj=obj_try)
-        if tuple(key_try) == (0, 0, 0):
-            sol = copy.deepcopy(out)
-            sol.routes = routes_try
-            sol.place = place_try
-            sol.shelf_seq = _dc_shelf_seq(out.shelf_seq)
-            return sol
-        if (tuple(key_try) < tuple(best_key)) or (tuple(key_try) == tuple(best_key) and float(obj_try) < float(best_obj) - 1e-9):
-            best_key = tuple(key_try)
-            best_obj = float(obj_try)
-            best_sol = copy.deepcopy(out)
-            best_sol.routes = routes_try
-            best_sol.place = place_try
-            best_sol.shelf_seq = _dc_shelf_seq(out.shelf_seq)
-
-    return best_sol
-
-
-def repair_shelf_seq_by_chain_violations(
-    sol,
-    *,
-    evaluator_exact: RobustEvaluator,
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-    max_steps: int = 80,
-):
-    """
-    Exact-diagnostic guided shelf_seq repair:
-    repeatedly read chain_order_violation_detail and reorder shelf sequence accordingly.
-    """
-    cur = copy.deepcopy(sol)
-    cur.routes = _dc_routes(getattr(cur, "routes", {}) or {})
-    cur.place = _dc_place(getattr(cur, "place", {}) or {})
-    cur.shelf_seq = _dc_shelf_seq(getattr(cur, "shelf_seq", {}) or {})
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-    cur.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        cur.shelf_seq,
-        evaluator=evaluator_exact,
-        task_shelf_mapping=clean_map,
-    )
-
-    def _find_task_pos(routes_dict: Dict[int, List[int]], task_id: int) -> Tuple[Optional[int], Optional[int]]:
-        tj = int(task_id)
-        for rr, seq_rr in routes_dict.items():
-            seq_i = [int(x) for x in (seq_rr or [])]
-            for ii, vv in enumerate(seq_i):
-                if int(vv) == tj:
-                    return int(rr), int(ii)
-        return None, None
-
-    for _ in range(max(1, int(max_steps))):
-        cur.routes = _normalize_ws_blocks(cur.routes, evaluator_exact)
-        cur.routes = normalize_routes_by_shelf_seq_order(cur.routes, cur.shelf_seq, clean_map)
-        obj, det = _safe_evaluate(evaluator_exact, cur.routes, cur.shelf_seq, cur.place)
-        if math.isfinite(float(obj)):
-            return cur
-
-        info = (det.get("chain_order_violation_detail", {}) if isinstance(det, dict) else {}) or {}
-        if not info:
-            break
-
-        c = int(info.get("chain", -1))
-        prev_j = int(info.get("prev", -1))
-        cur_j = int(info.get("cur", -1))
-        if c not in cur.shelf_seq:
-            break
-        seq = [int(x) for x in (cur.shelf_seq.get(c, []) or [])]
-        if (prev_j not in seq) or (cur_j not in seq):
-            break
-
-        # Route-level repair first: place the violating successor right after predecessor.
-        r_prev, i_prev_route = _find_task_pos(cur.routes, prev_j)
-        r_cur, i_cur_route = _find_task_pos(cur.routes, cur_j)
-        if (r_prev is not None) and (i_prev_route is not None) and (r_cur is not None) and (i_cur_route is not None):
-            seq_cur = [int(x) for x in (cur.routes.get(int(r_cur), []) or [])]
-            seq_prev = [int(x) for x in (cur.routes.get(int(r_prev), []) or [])]
-            if 0 <= int(i_cur_route) < len(seq_cur):
-                seq_cur.pop(int(i_cur_route))
-                cur.routes[int(r_cur)] = seq_cur
-                # Re-locate predecessor index after deletion in same route case.
-                seq_prev = [int(x) for x in (cur.routes.get(int(r_prev), []) or [])]
-                try:
-                    i_prev_now = int(seq_prev.index(int(prev_j)))
-                except Exception:
-                    i_prev_now = max(0, min(len(seq_prev), int(i_prev_route)))
-                ins_pos = max(0, min(len(seq_prev), i_prev_now + 1))
-                seq_prev.insert(ins_pos, int(cur_j))
-                cur.routes[int(r_prev)] = seq_prev
-                # Keep end shelf consistent along a violating pair to reduce hard-repair burden.
-                if int(prev_j) in cur.place:
-                    cur.place[int(cur_j)] = int(cur.place[int(prev_j)])
-
-        i_prev = int(seq.index(prev_j))
-        i_cur = int(seq.index(cur_j))
-        if i_cur <= i_prev:
-            # Violation usually means "cur is too early": move cur right after prev in this chain.
-            val = int(seq.pop(i_cur))
-            if i_cur < i_prev:
-                i_prev -= 1
-            seq.insert(i_prev + 1, val)
-        else:
-            # Already after prev but still too early in time: push cur later.
-            if i_cur + 1 < len(seq):
-                seq[i_cur], seq[i_cur + 1] = seq[i_cur + 1], seq[i_cur]
-            elif i_cur > 0:
-                val = int(seq.pop(i_cur))
-                seq.append(val)
-            else:
-                break
-        cur.shelf_seq[int(c)] = seq
-
-    return cur
-
-
-def repair_chain_violations_by_route_relink(
-    sol,
-    *,
-    evaluator_exact: RobustEvaluator,
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-    max_steps: int = 120,
-):
-    """
-    Exact-diagnostic guided chain repair:
-    move violating successor task onto predecessor route and delay it in both route and shelf chain.
-    """
-    cur = copy.deepcopy(sol)
-    cur.routes = _dc_routes(getattr(cur, "routes", {}) or {})
-    cur.place = _dc_place(getattr(cur, "place", {}) or {})
-    cur.shelf_seq = _dc_shelf_seq(getattr(cur, "shelf_seq", {}) or {})
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-    cur.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        cur.shelf_seq,
-        evaluator=evaluator_exact,
-        task_shelf_mapping=clean_map,
-    )
-
-    def _find_task_pos(routes_dict: Dict[int, List[int]], task_id: int) -> Tuple[Optional[int], Optional[int]]:
-        tj = int(task_id)
-        for rr, seq_rr in routes_dict.items():
-            seq_i = [int(x) for x in (seq_rr or [])]
-            for ii, vv in enumerate(seq_i):
-                if int(vv) == tj:
-                    return int(rr), int(ii)
-        return None, None
-
-    best = copy.deepcopy(cur)
-    best_obj, best_det = _safe_evaluate(evaluator_exact, best.routes, best.shelf_seq, best.place)
-    best_key = tuple(_safe_infeas_key(best_det, evaluator_exact, obj=best_obj))
-
-    pair_hits: Dict[Tuple[int, int], int] = defaultdict(int)
-    for _ in range(max(1, int(max_steps))):
-        cur.routes = _normalize_ws_blocks(cur.routes, evaluator_exact)
-        cur.routes = normalize_routes_by_shelf_seq_order(cur.routes, cur.shelf_seq, clean_map)
-        obj, det = _safe_evaluate(evaluator_exact, cur.routes, cur.shelf_seq, cur.place)
-        key = tuple(_safe_infeas_key(det, evaluator_exact, obj=obj))
-        if (key < best_key) or (key == best_key and float(obj) < float(best_obj) - 1e-9):
-            best = copy.deepcopy(cur)
-            best_key = key
-            best_obj = float(obj)
-        if key == (0, 0, 0):
-            return cur
-
-        info = (det.get("chain_order_violation_detail", {}) if isinstance(det, dict) else {}) or {}
-        if not info:
-            break
-        c = int(info.get("chain", -1))
-        prev_j = int(info.get("prev", -1))
-        cur_j = int(info.get("cur", -1))
-        if (prev_j <= 0) or (cur_j <= 0):
-            break
-
-        pair = (int(prev_j), int(cur_j))
-        pair_hits[pair] = int(pair_hits.get(pair, 0)) + 1
-        if int(pair_hits[pair]) > 8:
-            # Avoid over-fixing one pair and collapsing route diversity.
-            break
-
-        # 1) Shelf-chain delay for successor.
-        if c in cur.shelf_seq:
-            seq_c = [int(x) for x in (cur.shelf_seq.get(int(c), []) or [])]
-            if (prev_j in seq_c) and (cur_j in seq_c):
-                i_prev = int(seq_c.index(prev_j))
-                i_cur = int(seq_c.index(cur_j))
-                val = int(seq_c.pop(i_cur))
-                if i_cur < i_prev:
-                    i_prev -= 1
-                ins_pos = max(0, min(len(seq_c), i_prev + 1))
-                seq_c.insert(ins_pos, val)
-                cur.shelf_seq[int(c)] = seq_c
-
-        # 2) Route-level delay: put successor behind predecessor on predecessor AGV.
-        r_prev, i_prev_route = _find_task_pos(cur.routes, prev_j)
-        r_cur, i_cur_route = _find_task_pos(cur.routes, cur_j)
-        if (r_prev is None) or (i_prev_route is None) or (r_cur is None) or (i_cur_route is None):
-            continue
-
-        seq_cur = [int(x) for x in (cur.routes.get(int(r_cur), []) or [])]
-        if 0 <= int(i_cur_route) < len(seq_cur):
-            seq_cur.pop(int(i_cur_route))
-            cur.routes[int(r_cur)] = seq_cur
-
-        seq_prev = [int(x) for x in (cur.routes.get(int(r_prev), []) or [])]
-        try:
-            i_prev_now = int(seq_prev.index(int(prev_j)))
-        except Exception:
-            i_prev_now = max(0, min(len(seq_prev), int(i_prev_route)))
-
-        ins_pos = max(0, min(len(seq_prev), i_prev_now + 1))
-        seq_prev.insert(ins_pos, int(cur_j))
-        cur.routes[int(r_prev)] = seq_prev
-
-        if int(prev_j) in cur.place:
-            cur.place[int(cur_j)] = int(cur.place[int(prev_j)])
-
-    return best
 # =========================
 #         ALNS main
 # =========================
@@ -4447,7 +3156,7 @@ def alns_minimize(
     shelf_init: Optional[Dict[int, int]] = None,
     ws_order_idx: Optional[Dict[int, Dict[int, int]]] = None,
 
-    # ???????????????????????????????????????destroy???
+    # ✅ 新增：是否启用“鲁棒敏感 destroy”
     enable_robust_destroy: bool = True,
     adaptive_reaction: float = 0.20,
     adaptive_segment_len: int = 50,
@@ -4457,10 +3166,6 @@ def alns_minimize(
     reward_improve: float = 9.0,
     reward_accept: float = 3.0,
     reward_reject: float = 0.0,
-    feasible_first: bool = True,
-    enable_strong_init: bool = True,
-    strong_init_tries: int = 4,
-    strong_init_time_budget_sec: float = 0.0,
     speed_profile: str = "balanced",
     time_budget_sec: Optional[float] = None,
     relabel_interval: int = 20,
@@ -4468,19 +3173,12 @@ def alns_minimize(
     relabel_eval_top_k: int = 12,
     relabel_when_stagnating: bool = True,
     relabel_when_strong_shake: bool = True,
-    eval_budget_total: Optional[int] = None,
-    eval_budget_heavy: Optional[int] = None,
-    target_feasible_obj: Optional[float] = None,
 ):
-    assert S_near_by_j is not None, "????????????S_near_by_j ????????????????????????"
+    assert S_near_by_j is not None, "需要提供 S_near_by_j 作为回库位候选集"
     rng = random.Random(seed)
     task_shelf_mapping = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=True)
     profile = str(speed_profile or "balanced").strip().lower()
     turbo_mode = profile in {"turbo", "fast", "speed"}
-    if (not strong_init_time_budget_sec) or (float(strong_init_time_budget_sec) <= 0.0):
-        strong_init_budget = 3.0 if turbo_mode else 8.0
-    else:
-        strong_init_budget = float(strong_init_time_budget_sec)
     t_start = time.perf_counter()
     t_budget = None
     if time_budget_sec is not None:
@@ -4491,44 +3189,11 @@ def alns_minimize(
     if t_budget is not None and t_budget <= 0.0:
         t_budget = None
 
-    class _EvalCounterProxy:
-        def __init__(self, base):
-            self._base = base
-            self.calls = 0
-
-        def evaluate(self, routes, shelf_seq, place, *args, **kwargs):
-            self.calls += 1
-            return self._base.evaluate(routes, shelf_seq, place, *args, **kwargs)
-
-        def __getattr__(self, name):
-            return getattr(self._base, name)
-
-    evaluator = _EvalCounterProxy(evaluator)
-
     # =========================
-    # ???????????????????????????????????????
+    # 规模自适应控参（提速关键）
     # =========================
     n_tasks = len(list(evaluator.J))
     n_s = len(list(evaluator.S))
-
-    if eval_budget_total is None:
-        eval_budget_total_eff = 10**9
-    else:
-        eval_budget_total_eff = max(1000, int(eval_budget_total))
-
-    if eval_budget_heavy is None:
-        eval_budget_heavy_eff = max(500, int(0.70 * float(eval_budget_total_eff)))
-    else:
-        eval_budget_heavy_eff = max(100, int(eval_budget_heavy))
-
-    target_feasible_obj_eff: Optional[float] = None
-    if target_feasible_obj is not None:
-        try:
-            tfo = float(target_feasible_obj)
-            if math.isfinite(tfo):
-                target_feasible_obj_eff = float(tfo)
-        except Exception:
-            target_feasible_obj_eff = None
 
     if n_tasks <= 30:
         if turbo_mode:
@@ -4546,24 +3211,7 @@ def alns_minimize(
     if n_s >= 300:
         max_place_try_each_base = min(max_place_try_each_base, 4)
 
-    init_seed = copy.deepcopy(init)
-    if enable_strong_init:
-        try:
-            init_seed = _construct_strong_initial_solution(
-                init_seed,
-                evaluator=evaluator,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init=shelf_init,
-                seed=seed,
-                max_tries=int(strong_init_tries),
-                time_budget_sec=float(strong_init_budget),
-                only_when_infeasible=True,
-            )
-        except Exception as e:
-            print(f"[ALNS-init] strong constructor failed, fallback to raw init: {type(e).__name__}: {e}")
-
-    best = copy.deepcopy(init_seed)
+    best = copy.deepcopy(init)
     best.routes = _dc_routes(best.routes)
     best.place = _dc_place(best.place)
     best.shelf_seq = _dc_shelf_seq(best.shelf_seq)
@@ -4574,10 +3222,6 @@ def alns_minimize(
 
     best_obj = float(best_obj)
     best_key = _safe_infeas_key(best_details, evaluator, obj=best_obj)
-    key_feas = (0, 0, 0)
-
-    best_feasible = copy.deepcopy(best) if tuple(best_key) == key_feas else None
-    best_feasible_obj = float(best_obj) if tuple(best_key) == key_feas else float("inf")
 
     cur = copy.deepcopy(best)
     cur_obj = float(best_obj)
@@ -4591,7 +3235,7 @@ def alns_minimize(
     # =========================================================
     # ALNS Adaptive core: destroy/repair weights (the "A")
     # =========================================================
-    # destroy ?????????????????????????????????
+    # destroy 算子池（名字只是标签）
     destroy_names = [
         "rand_small",
         "shaw_related",
@@ -4602,7 +3246,7 @@ def alns_minimize(
         "robust_sensitive",
         "rand_big",
     ]
-    # ?????????????????????????????????????????????????????????
+    # 初始权重：可以用你原来的概率当“先验”
     init_destroy_w = {
         "rand_small": 1.00,
         "shaw_related": 0.90,
@@ -4622,7 +3266,7 @@ def alns_minimize(
         w_max=adaptive_w_max,
     )
 
-    # repair ??????????????????????????????????????? repair ??????????????????
+    # repair 算子池（至少两个，才算“有 repair 的自适应”）
     repair_names = ["repair_unordered", "repair_ordered"]
     init_repair_w = {"repair_unordered": 1.0, "repair_ordered": 1.0}
     repair_pool = AdaptiveOpPool(
@@ -4634,10 +3278,10 @@ def alns_minimize(
         w_max=adaptive_w_max,
     )
 
-    # ?????? destroy ???????????? removed_order ????????????seed-first / gap-first???
+    # 哪些 destroy 必须保留 removed_order 的语义（seed-first / gap-first）
     ordered_required = {"ws_gap_bundle", "ws_idle_gap", "ws_critical", "robust_sensitive"}
 
-    # reward ???????????????ALNS???
+    # reward 设计（标准 ALNS）
     SCORE_BEST = float(reward_best)
     SCORE_IMPROVE = float(reward_improve)
     SCORE_ACCEPT = float(reward_accept)
@@ -4648,23 +3292,23 @@ def alns_minimize(
     PAIR_DECAY = 0.995
     pair_quality: Dict[Tuple[str, str], float] = defaultdict(float)
 
-    # destroy?????????????????????????????????
+    # destroy：正常阶段（你原来的）
     P_DESTROY_RANDOM_SMALL = 0.40
     P_DESTROY_RELATED = 0.35
     P_DESTROY_CHAIN = 0.25
 
-    # ??????????????????????????????
+    # 邻域概率（你原来的）
     P_USE_CROSS_VEHICLE = 0.45
     P_USE_CROSS_BLOCK = 0.25
     P_USE_INTRA_2OPT = 0.30
     P_USE_INTRA_OROPT = 0.25
 
-    # ??????????????????????????????
+    # 停滞控制（你原来的）
     STAG_WS = 40
     STAG_LIMIT = 120
     P_WS_FOCUSED = 0.70
 
-    # ????????????????????????
+    # 回温（你原来的）
     REHEAT_SOFT = 2.50
     REHEAT_STRONG = 6.00
 
@@ -4672,7 +3316,7 @@ def alns_minimize(
     post_shake = 0
     stall = 0
 
-    # ????????? destroy ?????? gamma>0 ????????????????????????????????????????????????????????????????????????
+    # ✅ 鲁棒 destroy 只对 gamma>0 有意义；概率做一个温和值（不破坏你现有主力算子）
     def _robust_destroy_prob(stagnating: bool) -> float:
         if (not enable_robust_destroy) or (int(getattr(evaluator, "gamma", 0)) <= 0):
             return 0.0
@@ -4693,53 +3337,30 @@ def alns_minimize(
     if turbo_mode:
         effective_relabel_top_k = min(effective_relabel_top_k, 6)
 
-    if (target_feasible_obj_eff is not None) and (best_feasible is not None) and (float(best_feasible_obj) <= float(target_feasible_obj_eff) + 1e-9):
-        print(
-            f"[ALNS-inner] init already reaches target feasible obj <= {float(target_feasible_obj_eff):.2f}; skip iterations."
-        )
-        effective_iters = 0
-
     for it in range(effective_iters):
-        if (target_feasible_obj_eff is not None) and (best_feasible is not None) and (float(best_feasible_obj) <= float(target_feasible_obj_eff) + 1e-9):
-            print(
-                f"[ALNS-inner] stop by target feasible obj: {float(best_feasible_obj):.2f} <= {float(target_feasible_obj_eff):.2f} at iter {it}/{effective_iters}"
-            )
-            break
-        if int(getattr(evaluator, "calls", 0)) >= int(eval_budget_total_eff):
-            print(
-                f"[ALNS-inner] stop by eval budget: {int(eval_budget_total_eff)} calls "
-                f"at iter {it}/{effective_iters}"
-            )
-            break
         if (t_budget is not None) and ((time.perf_counter() - t_start) >= t_budget):
             print(f"[ALNS-inner] stop by time budget: {t_budget:.2f}s at iter {it}/{effective_iters}")
             break
         improved_best_this_iter = False
 
-        # ??????????????????stall ?????????post_shake ????????????????????????
+        # ✅ 真停滞只由 stall 决定；post_shake 只是“回温窗口”
         stagnating = (stall >= STAG_WS)
         post_mode = (post_shake > 0)
         strong_shake = (stall >= STAG_LIMIT)
 
-        # ?????????????????? post_mode ????????????????????????????????????
+        # 温度：停滞或 post_mode 都允许回温（帮助跳局优）
         if stagnating or post_mode:
             T = max(T, REHEAT_SOFT)
         if strong_shake:
             T = max(T, REHEAT_STRONG)
 
         if strong_shake:
-            if feasible_first and (best_feasible is not None):
-                cur = copy.deepcopy(best_feasible)
-                cur_obj = float(best_feasible_obj)
-                cur_details = {}
-                cur_key = key_feas
-            else:
-                cur = copy.deepcopy(best)
-                cur_obj = float(best_obj)
-                cur_details = dict(best_details) if isinstance(best_details, dict) else {}
-                cur_key = tuple(best_key)
+            cur = copy.deepcopy(best)
+            cur_obj = float(best_obj)
+            cur_details = dict(best_details) if isinstance(best_details, dict) else {}
+            cur_key = tuple(best_key)
 
-        # topk/extra???post_mode ?????????????????????????????? stagnating
+        # topk/extra：post_mode 只轻微加力，不要等同 stagnating
         if strong_shake:
             topk_insert = 3
             extra_shelves = 2
@@ -4755,7 +3376,7 @@ def alns_minimize(
 
         force_all_shelves = bool(strong_shake)
 
-        # ===== ?????????????????? stall ????????????post_mode ?????????????????????????????????=====
+        # ===== 评估预算：以 stall 为主控；post_mode 不要升级成“停滞级别” =====
         if strong_shake:
             repair_evals_per_task = 40 if turbo_mode else 35
             repair_evals_total = 220 if turbo_mode else 190
@@ -4772,11 +3393,11 @@ def alns_minimize(
         # =====================================================
         # -------------- 1) destroy + repair --------------
         # =====================================================
-        # ========== ?????????????????????????????????????????????????????????=========
+        # ========== 记录本迭代选中的算子（用于自适应更新）==========
         chosen_destroy = None
         chosen_repair = None
 
-        # ========== ???????????? removed_set ????????????????????????????????????==========
+        # ========== 工具：把 removed_set 变成一个“可控插回顺序” ==========
         def _ws_rank_local(jj: int) -> int:
             ws = int(pi.get(int(jj), -1))
             return int(ws_pos_global.get(ws, {}).get(int(jj), 10 ** 9))
@@ -4787,11 +3408,11 @@ def alns_minimize(
             lst.sort(key=lambda x: (_ws_rank_local(x), rng.random()))
             return lst
 
-        # ========== ????????? destroy+repair ????????? ==========
+        # ========== 自适应 destroy+repair 一步走 ==========
         def _adaptive_destroy_repair() -> Tuple[Dict[int, List[int]], Dict[int, int], str, str]:
             nonlocal stagnating, strong_shake, post_mode
 
-            # --------- 1) ???destroy ???????????????????????????---------
+            # --------- 1) 选 destroy 候选集（随阶段变）---------
             cand_destroy: List[str] = []
             if strong_shake:
                 cand_destroy = ["ws_gap_bundle", "ws_idle_gap", "rand_big"]
@@ -4810,7 +3431,7 @@ def alns_minimize(
 
             dname = destroy_pool.pick(rng, cand_destroy)
 
-            # --------- 2) ?????? destroy ---------
+            # --------- 2) 执行 destroy ---------
             if dname == "rand_small":
                 remove_frac = rng.uniform(0.15, 0.35)
                 removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
@@ -4871,7 +3492,7 @@ def alns_minimize(
                     max_k=5,
                 )
                 if not removed_order:
-                    # ???????????????????????????
+                    # 兜底：退化随机小删
                     remove_frac = rng.uniform(0.15, 0.35)
                     removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                     removed_order = _order_from_set(removed)
@@ -4893,17 +3514,17 @@ def alns_minimize(
                 )
 
             else:
-                # ???????????????name
+                # 防御：未知 name
                 remove_frac = rng.uniform(0.15, 0.35)
                 removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed)
 
             removed_set = set(int(x) for x in (removed_order or [])) if removed_order else set()
-            # ??????????????????????????????????????????????????????????????? repair
+            # ✅ 强制修复：把当前解里缺失的任务也加入本轮 repair
             missing = _missing_tasks_in_routes(cur.routes, evaluator)
             if missing:
                 miss_list = sorted((int(x) for x in missing), key=_ws_rank_local)
-                # ordered destroy ?????????seed-first ???????????????????????????
+                # ordered destroy 要保留 seed-first 的语义，所以只追加
                 if removed_order is None:
                     removed_order = []
                 for x in miss_list:
@@ -4911,13 +3532,13 @@ def alns_minimize(
                         removed_order.append(int(x))
                         removed_set.add(int(x))
             if not removed_set:
-                # ????????????
+                # 极端兜底
                 remove_frac = rng.uniform(0.15, 0.35)
                 removed_set, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed_set)
                 removed_set = set(int(x) for x in removed_order)
 
-            # --------- 3) ???repair?????????destroy ?????? ordered???--------
+            # --------- 3) 选 repair（有些 destroy 必须 ordered）---------
             if dname in ordered_required:
                 cand_repair = ["repair_ordered"]
             else:
@@ -4949,7 +3570,7 @@ def alns_minimize(
                         rname = str(rr)
                         break
 
-            # --------- 4) ?????? repair ---------
+            # --------- 4) 执行 repair ---------
             if rname == "repair_ordered":
                 routes_new_, place_new_ = repair_greedy_insert_with_place_ordered(
                     routes=routes_half,
@@ -4993,10 +3614,10 @@ def alns_minimize(
 
             return routes_new_, place_new_, dname, rname
 
-        # ========== ??????????????? destroy+repair ==========
+        # ========== 执行自适应 destroy+repair ==========
         routes_new, place_new, chosen_destroy, chosen_repair = _adaptive_destroy_repair()
 
-        # strong_shake ????????????+ ????????????????????????
+        # strong_shake 的“重置 + 回温窗口”仍保留
         if strong_shake:
             stall = 0
             post_shake = int(POST_SHAKE_ITERS)
@@ -5004,20 +3625,20 @@ def alns_minimize(
 
         # =====================================================
         # =====================================================
-        #  Gate?????????????????????????????????????????????heavy local search
+        #  Gate：先快评估一次，决定是否值得做 heavy local search
         # =====================================================
         # =====================================================
-        #  Gate?????????????????????????????????????????????heavy local search
+        #  Gate：先快评估一次，决定是否值得做 heavy local search
         # =====================================================
         # =====================================================
-        #  Gate????????????????????????????????? details?????????????????????heavy local search
+        #  Gate：先评估一次（同时拿到 details），决定是否做 heavy local search
         # =====================================================
         routes_new = _normalize_ws_blocks(routes_new, evaluator)
 
-        # ?????????????????????heavy local???????????? destroy+repair ???????????????SA
+        # 默认：不做任何 heavy local，直接用 destroy+repair 的结果参与 SA
         shelf_seq_new = cur.shelf_seq
 
-        # ???v(???routes??????) ???shelf_seq ???????????????????????? routes?????????ws_fixed_seq
+        # ✅ v(由routes隐含) 与 shelf_seq 一致性兜底：只动 routes，不动 ws_fixed_seq
         routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
 
         cand_obj_fast, cand_details_fast = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
@@ -5028,37 +3649,26 @@ def alns_minimize(
         delta0 = cand_obj_fast - float(cur_obj)
 
         p_min = 0.12 if turbo_mode else 0.15
-        gate_delta = -math.log(p_min) * float(T)  # ???3*T
+        gate_delta = -math.log(p_min) * float(T)  # ≈ 3*T
 
-        # if current state is infeasible, force heavy local to prioritize repairs
+        # ✅ 关键：当前不可行时，别让 Gate 把修复动作跳过
         infeasible_cur = (cur_key != (0, 0, 0))
-
-        allow_heavy_local = int(getattr(evaluator, "calls", 0)) < int(eval_budget_heavy_eff)
-        infeas_force_heavy = bool(
-            infeasible_cur and (
-                strong_shake
-                or stagnating
-                or (it < (30 if turbo_mode else 45))
-                or (cand_obj_fast < float(cur_obj) - 1e-9)
-                or ((it % (3 if turbo_mode else 4)) == 0)
-            )
-        )
 
         do_heavy_local = bool(
             strong_shake
             or (stagnating and ((it % (2 if turbo_mode else 2)) == 0))
             or (post_mode and ((it % (2 if turbo_mode else 3)) == 0))
-            or infeas_force_heavy
+            or infeasible_cur
             or (delta0 <= gate_delta)
-        ) and allow_heavy_local
+        )
 
-        # cand_obj / cand_details ?????? fast ???????????? heavy local??????????????????
+        # cand_obj / cand_details 先用 fast 的；若做 heavy local，后面会覆盖
         cand_obj = float(cand_obj_fast)
         cand_details = dict(cand_details_fast)
 
 
         # =====================================================
-        # -------------- 2) ?????????????????????????????? --------------
+        # -------------- 2) 邻域搜索（你原来的） --------------
         # =====================================================
         if do_heavy_local:
             if rng.random() < P_USE_CROSS_VEHICLE:
@@ -5071,7 +3681,7 @@ def alns_minimize(
                     task_shelf_mapping=task_shelf_mapping,
                     shelf_init_override=shelf_init,
                     rng=rng,
-                    try_swap=bool(stagnating or strong_shake),  # ???????????????/??????????????? swap
+                    try_swap=bool(stagnating or strong_shake),  # ✅ 只有停滞/强震荡才开 swap
                     max_trials=3,
                     max_pos_samples=8,
                     max_s_samples=5,
@@ -5170,15 +3780,6 @@ def alns_minimize(
                     global_try = 0
 
                 if do_tune:
-                    if strong_shake:
-                        tune_eval_budget = 120
-                        tune_cap = 50
-                    elif stagnating:
-                        tune_eval_budget = 80
-                        tune_cap = 45
-                    else:
-                        tune_eval_budget = 36 if turbo_mode else 45
-                        tune_cap = 36
                     place_new, _ = local_place_tune_once(
                         routes=routes_new,
                         shelf_seq=cur.shelf_seq,
@@ -5190,22 +3791,14 @@ def alns_minimize(
                         shelf_init_override=shelf_init,
                         top_k_try=5,
                         global_try_tasks=global_try,
-                        max_evals=tune_eval_budget,
-                        cap_total=tune_cap,
                     )
 
-            # ?????? shelf_seq ???????????????shelf_tune ?????????
+            # 默认 shelf_seq 不变；若做 shelf_tune 再覆盖
             shelf_seq_new = cur.shelf_seq
 
             if enable_shelf_tune and task_shelf_mapping:
                 do_reloc = strong_shake or (stagnating and ((it % 3) == 0)) or ((it % 12) == 0)
                 if do_reloc:
-                    if strong_shake:
-                        reloc_eval_budget = 70
-                    elif stagnating:
-                        reloc_eval_budget = 45
-                    else:
-                        reloc_eval_budget = 24 if turbo_mode else 30
                     shelf_seq_new, _ = local_shelf_seq_relocate_once(
                         routes=routes_new,
                         shelf_seq=cur.shelf_seq,
@@ -5213,7 +3806,6 @@ def alns_minimize(
                         evaluator=evaluator,
                         task_shelf_mapping=task_shelf_mapping,
                         rng=rng,
-                        max_evals=reloc_eval_budget,
                     )
 
                 do_promote = strong_shake or (stagnating and ((it % 2) == 0)) or ((it % 18) == 0)
@@ -5227,7 +3819,7 @@ def alns_minimize(
                         max_trials=14 if stagnating else 8,
                     )
 
-            if (it % (30 if turbo_mode else 35)) == 0:
+            if (it % 25) == 0:
                 routes_int, place_int, improved_int, _ = intensify_critical_tail_once(
                     routes=routes_new,
                     place=place_new,
@@ -5277,9 +3869,9 @@ def alns_minimize(
             #         routes_new = routes_rl
             #         cand_obj = float(obj_rl)
 
-        # ?????????do_heavy_local=False???
-        # ?????????routes_new/ place_new ?????? destroy+repair???shelf_seq_new=cur.shelf_seq???
-        # cand_obj ?????????cand_obj_fast???????????????SA accept?????????????????????????????????
+        # （如果 do_heavy_local=False）
+        # 此时：routes_new/ place_new 来自 destroy+repair，shelf_seq_new=cur.shelf_seq，
+        # cand_obj 直接用 cand_obj_fast，马上进入 SA accept（你下面那段不需要改）
 
         # =====================================================
         # -------------- 4) evaluate + relabel --------------
@@ -5288,7 +3880,7 @@ def alns_minimize(
         # -------------- 4) evaluate + relabel --------------
         # =====================================================
         if do_heavy_local:
-            # heavy local ???????????? routes_new / shelf_seq_new / place_new?????????????????????
+            # heavy local 已经改过 routes_new / shelf_seq_new / place_new，需要最终评估
             routes_new = _normalize_ws_blocks(routes_new, evaluator)
             routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
             cand_obj, cand_details = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
@@ -5296,7 +3888,7 @@ def alns_minimize(
             cand_obj = float(cand_obj)
             cand_details = dict(cand_details) if isinstance(cand_details, dict) else {}
         else:
-            # do_heavy_local=False???Gate ?????????evaluate ?????????????????? cand_obj/cand_details
+            # do_heavy_local=False：Gate 时已经 evaluate 过，直接复用 cand_obj/cand_details
             cand_obj = float(cand_obj)
             cand_details = dict(cand_details) if isinstance(cand_details, dict) else {}
 
@@ -5320,10 +3912,10 @@ def alns_minimize(
             if obj_rl < float(cand_obj) - 1e-9:
                 routes_new = routes_rl
 
-                # ???relabel ??????????????????????????? v ???shelf_seq ??????
+                # ✅ relabel 后再兜底一次：保证 v 与 shelf_seq 一致
                 routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
 
-                # ????????????relabel ?????? routes?????????????????????details?????????SA ?????? cand_key???
+                # ✅ 重要：relabel 改了 routes，必须同步更新 details（否则 SA 用错 cand_key）
                 cand_obj, cand_details = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
                 cand_obj = float(cand_obj)
                 cand_details = dict(cand_details) if isinstance(cand_details, dict) else {}
@@ -5337,73 +3929,43 @@ def alns_minimize(
         # =====================================================
         # -------------- 5) SA accept (feasibility-first) -----
         # =====================================================
-        # ???????????????????????????????????? cur/best?????????reward ???????????????accept ???cur ????????????
+        # ✅ 关键：缓存“上一轮”的 cur/best，用于 reward 判定（避免 accept 后 cur 被覆盖）
         prev_cur_obj = float(cur_obj)
         prev_cur_key = tuple(cur_key)
         prev_best_obj = float(best_obj)
         prev_best_key = tuple(best_key)
 
         cand_key = _safe_infeas_key(cand_details, evaluator, obj=cand_obj)
-        cand_feas = (tuple(cand_key) == key_feas)
-        prev_cur_feas = (tuple(prev_cur_key) == key_feas)
 
         accept = False
-        target_hit = False
 
-        if feasible_first:
-            # Feasibility-first acceptance: never move from feasible back to worse infeasible states.
-            if cand_key < prev_cur_key:
+        # 1) 不可行度变好：无条件接受（feasibility-first）
+        if cand_key < prev_cur_key:
+            accept = True
+
+        # 2) 不可行度一样：对 objective 用 SA
+        elif cand_key == prev_cur_key:
+            if cand_obj < prev_cur_obj - 1e-9:
                 accept = True
-            elif cand_key == prev_cur_key:
-                if cand_obj < prev_cur_obj - 1e-9:
-                    accept = True
-                else:
-                    delta = float(cand_obj) - float(prev_cur_obj)
-                    x_obj = -delta / max(1e-9, float(T))
-                    if x_obj >= 700.0:
-                        prob = 1.0
-                    elif x_obj <= -700.0:
-                        prob = 0.0
-                    else:
-                        prob = math.exp(x_obj)
-                    if rng.random() < prob:
-                        accept = True
             else:
-                # cand infeas ??????
-                if prev_cur_feas:
-                    accept = False
-                else:
-                    accept = False
-        else:
-            # ????????????????????????infeas-SA ?????????????????????infeas
-            if cand_key < prev_cur_key:
-                accept = True
-            elif cand_key == prev_cur_key:
-                if cand_obj < prev_cur_obj - 1e-9:
-                    accept = True
-                else:
-                    delta = float(cand_obj) - float(prev_cur_obj)
-                    x_obj = -delta / max(1e-9, float(T))
-                    if x_obj >= 700.0:
-                        prob = 1.0
-                    elif x_obj <= -700.0:
-                        prob = 0.0
-                    else:
-                        prob = math.exp(x_obj)
-                    if rng.random() < prob:
-                        accept = True
-            else:
-                delta_inf = _safe_infeas_scalar(cand_details, evaluator, obj=cand_obj) - _safe_infeas_scalar(cur_details, evaluator, obj=cur_obj)
-                T_inf = max(1.0, 2.0 * float(T))
-                x = -float(delta_inf) / max(1e-9, float(T_inf))
-                if x >= 700.0:
-                    prob = 1.0
-                elif x <= -700.0:
-                    prob = 0.0
-                else:
-                    prob = math.exp(x)
+                delta = float(cand_obj) - float(prev_cur_obj)
+                prob = math.exp(-delta / max(1e-9, float(T)))
                 if rng.random() < prob:
                     accept = True
+
+        # 3) 不可行度变差：允许少量以 infeas-SA 接受（避免卡死）
+        else:
+            delta_inf = _safe_infeas_scalar(cand_details, evaluator, obj=cand_obj) - _safe_infeas_scalar(cur_details, evaluator, obj=cur_obj)
+            T_inf = max(1.0, 2.0 * float(T))
+            x = -float(delta_inf) / max(1e-9, float(T_inf))
+            if x >= 700.0:
+                prob = 1.0
+            elif x <= -700.0:
+                prob = 0.0
+            else:
+                prob = math.exp(x)
+            if rng.random() < prob:
+                accept = True
 
         if accept:
             cur.routes = routes_new
@@ -5414,7 +3976,7 @@ def alns_minimize(
             cur_details = dict(cand_details) if isinstance(cand_details, dict) else {}
             cur_key = tuple(cand_key)
 
-            # best ?????????????????????prev_best?????????????????????
+            # best 更新：也要基于 prev_best（可行性优先）
             if (cand_key < prev_best_key) or (cand_key == prev_best_key and cand_obj < prev_best_obj - 1e-9):
                 best = copy.deepcopy(cur)
                 best_obj = float(cand_obj)
@@ -5422,17 +3984,10 @@ def alns_minimize(
                 best_details = dict(cur_details) if isinstance(cur_details, dict) else {}
                 improved_best_this_iter = True
 
-            if cand_feas and (cand_obj < best_feasible_obj - 1e-9):
-                best_feasible = copy.deepcopy(cur)
-                best_feasible_obj = float(cand_obj)
-
-                if (target_feasible_obj_eff is not None) and (float(best_feasible_obj) <= float(target_feasible_obj_eff) + 1e-9):
-                    target_hit = True
-
         # =====================================================
         # -------------- 5.5) Adaptive weight update ----------
         # =====================================================
-        # ????????? ALNS???reward ???cand ?????? prev_cur / prev_best
+        # ✅ 标准 ALNS：reward 用 cand 对比 prev_cur / prev_best
         if accept:
             is_new_best = (cand_key < prev_best_key) or (cand_key == prev_best_key and cand_obj < prev_best_obj - 1e-9)
             is_improve_cur = (cand_key < prev_cur_key) or (cand_key == prev_cur_key and cand_obj < prev_cur_obj - 1e-9)
@@ -5470,13 +4025,6 @@ def alns_minimize(
 
         destroy_pool.maybe_update(it)
         repair_pool.maybe_update(it)
-
-        if target_hit:
-            print(
-                f"[ALNS-inner] hit target feasible obj: {float(best_feasible_obj):.2f} <= {float(target_feasible_obj_eff):.2f} at iter {it + 1}"
-            )
-            break
-
         # =====================================================
         # -------------- 6) cool & stall --------------
         # =====================================================
@@ -5501,53 +4049,49 @@ def alns_minimize(
 
     print(f"[ALNS-inner] best_obj after SA = {best_obj:.2f}")
 
-    final_sol = best_feasible if (feasible_first and best_feasible is not None) else best
-    final_obj = best_feasible_obj if (feasible_first and best_feasible is not None) else best_obj
-
-    final_sol.routes = _normalize_ws_blocks(final_sol.routes, evaluator)
+    best.routes = _normalize_ws_blocks(best.routes, evaluator)
     best_rl, best_rl_obj = _relabel_best_routes(
-        final_sol.routes,
+        best.routes,
         evaluator=evaluator,
-        shelf_seq=final_sol.shelf_seq,
-        place=final_sol.place,
+        shelf_seq=best.shelf_seq,
+        place=best.place,
         max_exact_agv=int(relabel_max_exact_agv),
         eval_top_k=int(effective_relabel_top_k),
         task_shelf_mapping=task_shelf_mapping,
         shelf_init_override=shelf_init,
     )
-    if best_rl_obj < float(final_obj) - 1e-9:
-        final_sol.routes = best_rl
-        final_obj = float(best_rl_obj)
+    if best_rl_obj < float(best_obj) - 1e-9:
+        best.routes = best_rl
+        best_obj = float(best_rl_obj)
 
     final_tail_rounds = 0 if turbo_mode else 1
     for _ in range(final_tail_rounds):
         routes_int, place_int, improved_int, obj_int = intensify_critical_tail_once(
-            routes=final_sol.routes,
-            place=final_sol.place,
-            shelf_seq=final_sol.shelf_seq,
+            routes=best.routes,
+            place=best.place,
+            shelf_seq=best.shelf_seq,
             evaluator=evaluator,
             S_near_by_j=S_near_by_j,
             task_shelf_mapping=task_shelf_mapping,
             shelf_init_override=shelf_init,
             tail_k=2,
         )
-        if improved_int and float(obj_int) < float(final_obj) - 1e-9:
-            final_sol.routes, final_sol.place = routes_int, place_int
-            final_obj = float(obj_int)
+        if improved_int and float(obj_int) < float(best_obj) - 1e-9:
+            best.routes, best.place = routes_int, place_int
+            best_obj = float(obj_int)
         else:
             break
 
-    print(f"[ALNS-inner] final_best_obj = {final_obj:.2f}")
-    print(f"[ALNS-inner] eval_calls = {int(getattr(evaluator, 'calls', 0))}")
-    # ?????????????????????????????????????????? routes ???shelf_seq ??????????????? ws_fixed_seq???    final_sol.routes = _normalize_ws_blocks(final_sol.routes, evaluator)
-    final_sol.routes = normalize_routes_by_shelf_seq_order(final_sol.routes, final_sol.shelf_seq, task_shelf_mapping)
+    print(f"[ALNS-inner] final_best_obj = {best_obj:.2f}")
+    # ✅ 返回前兜底：保证最终输出的 routes 与 shelf_seq 一致（不动 ws_fixed_seq）
+    best.routes = _normalize_ws_blocks(best.routes, evaluator)
+    best.routes = normalize_routes_by_shelf_seq_order(best.routes, best.shelf_seq, task_shelf_mapping)
     _ = basic_feasibility_check_level0(
-        routes=final_sol.routes,
-        shelf_seq=final_sol.shelf_seq,
-        place=final_sol.place,
+        routes=best.routes,
+        shelf_seq=best.shelf_seq,
+        place=best.place,
         evaluator=evaluator,
         task_shelf_mapping=task_shelf_mapping,
         verbose=True,
     )
-    return final_sol
-
+    return best

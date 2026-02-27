@@ -1,50 +1,28 @@
 {
   "prefix": "demo01",
-  "bench_iters": 2000,
+  "bench_iters": 1000,
   "bench_seeds": [
     0
   ],
   "bench_gammas": [
-    0,
-    5,
-    10
+    5
   ],
-  "total_wall_time_sec": 1330.7315529999905,
+  "total_wall_time_sec": 214.9797001000261,
   "overall": {
-    "score": 1381.5364335750012,
-    "n_total_runs": 3,
+    "score": 494.7489140599995,
+    "n_total_runs": 1,
     "overall_feasible_rate": 1.0
   },
   "by_gamma": [
     {
-      "gamma": 0,
-      "n_runs": 1,
-      "feasible_rate": 1.0,
-      "makespan_mean": 328.0,
-      "makespan_p50": 328.0,
-      "makespan_p90": 328.0,
-      "wall_time_mean_sec": 437.08083809999516,
-      "score_gamma": 349.85404190499975
-    },
-    {
       "gamma": 5,
       "n_runs": 1,
       "feasible_rate": 1.0,
-      "makespan_mean": 477.0,
-      "makespan_p50": 477.0,
-      "makespan_p90": 477.0,
-      "wall_time_mean_sec": 446.2503684000112,
-      "score_gamma": 499.3125184200006
-    },
-    {
-      "gamma": 10,
-      "n_runs": 1,
-      "feasible_rate": 1.0,
-      "makespan_mean": 510.0,
-      "makespan_p50": 510.0,
-      "makespan_p90": 510.0,
-      "wall_time_mean_sec": 447.3974650000164,
-      "score_gamma": 532.3698732500009
+      "makespan_mean": 484.0,
+      "makespan_p50": 484.0,
+      "makespan_p90": 484.0,
+      "wall_time_mean_sec": 214.9782811999903,
+      "score_gamma": 494.7489140599995
     }
   ]
 }
