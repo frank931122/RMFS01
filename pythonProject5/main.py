@@ -1,4 +1,4 @@
-﻿# main.py
+# main.py
 # main.py
 import os
 import argparse
@@ -36,8 +36,9 @@ from pathlib import Path
 
 class EvalProfiler:
     """
-    鍖呬竴灞?evaluator锛岀粺璁?evaluate() 琚皟鐢ㄦ鏁般€佹€昏€楁椂銆佸钩鍧囪€楁椂銆?
-    杩欐牱浣犺兘绔嬪埢鍒ゆ柇鐡堕鏄細evaluate 澶參 杩樻槸 璋冪敤娆℃暟鐖嗙偢銆?
+    Wrap an evaluator and profile evaluate() call count and timings.
+    This helps determine whether bottlenecks come from slow evaluate calls
+    or from too many evaluate invocations.
     """
     def __init__(self, evaluator):
         self.evaluator = evaluator
@@ -53,7 +54,7 @@ class EvalProfiler:
         return obj, diag
 
     def __getattr__(self, name: str):
-        # 璁?alns_min 鍐呴儴鑻ヨ闂?evaluator.gamma / evaluator.J 绛夛紝涔熻兘閫忎紶
+        # Let alns_min transparently access evaluator.gamma / evaluator.J etc.
         return getattr(self.evaluator, name)
 
     def report(self, tag: str = "[Profiler]"):
@@ -163,8 +164,8 @@ def print_solution_full_from_diag(
     diag: dict,
 ) -> None:
     """
-    鎶?evaluator 鐨?diag锛堝寘鍚?timeline/pq/v_arcs 绛夛級鎸夆€滀汉鑳借鎳傗€濈殑褰㈠紡鎵撳嵃鍑烘潵銆?
-    鐢ㄤ簬锛氬悓涓€濂楄В鍦?eval_gamma=0 鍜?eval_gamma=1 涓嬬殑瀵圭収杈撳嚭銆?
+    ?evaluator ?diag?timeline/pq/v_arcs ?
+    ?eval_gamma=0 ?eval_gamma=1 ?
     """
     def _to_float(v, default=float("nan")) -> float:
         try:
@@ -189,7 +190,7 @@ def print_solution_full_from_diag(
             return None
 
     print("\n" + "-" * 70)
-    print(f"[{title}] evaluator 纬={int(gamma_eval)} | makespan={float(makespan):.2f}")
+    print(f"[{title}] evaluator ={int(gamma_eval)} | makespan={float(makespan):.2f}")
 
     # Routes
     print("\n  Routes:")
@@ -218,7 +219,7 @@ def print_solution_full_from_diag(
     q_raw = (diag.get("q", {}) or {}) if isinstance(diag, dict) else {}
     end_final = (diag.get("end_shelf_final", {}) or {}) if isinstance(diag, dict) else {}
 
-    # 鍏煎 key 鍙兘鏄?str
+    # Keys may be either int or str in diagnostics
     def _get_map_val(m: dict, key_int: int):
         if key_int in m:
             return m[key_int]
@@ -243,7 +244,7 @@ def print_solution_full_from_diag(
     # V_arcs
     V_arcs = (diag.get("V_arcs", []) or []) if isinstance(diag, dict) else []
     if V_arcs:
-        print("\n  v[i,j,s,s鈥橾 = 1 (derived by evaluator):")
+        print("\n  v[i,j,s,s = 1 (derived by evaluator):")
         for arc in V_arcs:
             try:
                 i, j, s, sp = arc
@@ -280,7 +281,7 @@ def print_solution_full_from_diag(
                 f"arrCell_nom={_to_float(_get(rec,'arrive_cell_nom')):.2f} arrCell_act={_to_float(_get(rec,'arrive_cell_act')):.2f}"
             )
 
-            # 濡傛灉 evaluator 杈撳嚭閲屽寘鍚?layer 0 / layer G 鐨勫鐓у瓧娈碉紝灏遍澶栨墦鍗颁竴琛岋紙杩欏瀹氫綅浣犺鐨勨€溛?=1 鍏堣窇 纬=0 鍩哄噯鈥濋潪甯稿叧閿級
+            #  evaluator ?layer 0 / layer G ?=1  =0 
             has_layer = any(
                 _get(rec, k) is not None
                 for k in [
@@ -299,7 +300,7 @@ def print_solution_full_from_diag(
                     f"cell_act0={_to_float(_get(rec,'arrive_cell_act_0')):.2f} cell_actG={_to_float(_get(rec,'arrive_cell_act_G')):.2f}"
                 )
 
-            # LB 淇℃伅锛堝鏋滄湁锛?
+            # LB ?
             if _get(rec, "place_lb") is not None or _to_float(_get(rec, "place_wait_due_to_lb")) > 1e-9:
                 print(
                     "        [LB] "
@@ -317,11 +318,11 @@ def align_test_milp_vs_evaluator(
     milp_obj,
 ):
     """
-    鐩爣锛氶獙璇?evaluator(routes_by_agv, shelf_seq, place_from_x) 鏄惁绛変簬 MILP 鐨勭洰鏍囧€?
-    - routes_by_agv: {agv_id: [task,...], ...}锛堢敤 MILP 杈撳嚭閭ｅ锛?
-    - x_vars: Gurobi 鐨?x 鍙橀噺瀹瑰櫒锛堟敮鎸?x[j,s] 鎴?x[j][s]锛?
+    ?evaluator(routes_by_agv, shelf_seq, place_from_x)  MILP ?
+    - routes_by_agv: {agv_id: [task,...], ...} MILP ?
+    - x_vars: Gurobi ?x ?x[j,s] ?x[j][s]?
     """
-    # 1) 浠?MILP 鐨?x[j,s] 鎶藉彇 place锛歵ask -> end_shelf_cell
+    # 1) ?MILP ?x[j,s]  placeask -> end_shelf_cell
     place = {}
     J = [int(j) for j in evaluator.J]
     S = [int(s) for s in evaluator.S]
@@ -331,7 +332,7 @@ def align_test_milp_vs_evaluator(
         best_val = -1.0
         for s in S:
             v = None
-            # 鍏煎涓ょ绱㈠紩锛歺[j,s] 鎴?x[j][s]
+            # [j,s] ?x[j][s]
             try:
                 v = x_vars[j, s]
             except Exception:
@@ -346,7 +347,7 @@ def align_test_milp_vs_evaluator(
             try:
                 val = float(v.X)  # Gurobi Var
             except Exception:
-                val = float(v)    # 浠ラ槻浣犲瓨鐨勬槸鏁板€?
+                val = float(v)    # ?
 
             if val > best_val:
                 best_val = val
@@ -357,9 +358,9 @@ def align_test_milp_vs_evaluator(
 
     missing = [j for j in J if j not in place]
     if missing:
-        print(f"[ALIGN-TEST] WARN: 浠ヤ笅浠诲姟娌℃湁浠?x[j,s] 瑙ｆ瀽鍑哄洖搴撲綅: {missing}")
+        print(f"[ALIGN-TEST] WARN: ?x[j,s] : {missing}")
 
-    # 2) 鐢?evaluator 澶嶇畻 MILP 鐨?routes + place
+    # 2) ?evaluator  MILP ?routes + place
     routes_chk = {int(r): [int(t) for t in seq] for r, seq in routes_by_agv.items()}
     obj_eval, diag = evaluator.evaluate(routes_chk, shelf_seq, place)
 
@@ -369,11 +370,11 @@ def align_test_milp_vs_evaluator(
 
     print(f"[ALIGN-TEST] MILP obj={milp_obj:.2f} | evaluator obj={obj_eval:.2f} | diff={diff:+.2f}")
 
-    # 3) 濡傛灉涓嶄竴鑷达紝缁欏嚭鏈€鏈夌敤鐨勪笅涓€姝ョ嚎绱細鎵撳嵃 p/q锛堝鏋?evaluator 鎻愪緵锛?
+    # 3)  p/q?evaluator ?
     if abs(diff) > 1e-6 and isinstance(diag, dict):
         p = diag.get("p", {}) or {}
         q = diag.get("q", {}) or {}
-        print("[ALIGN-TEST] evaluator 鐨?p/q锛堜究浜庡鐓?MILP 瀵煎嚭鐨?p_q_times CSV锛?")
+        print("[ALIGN-TEST] evaluator ?p/q?MILP ?p_q_times CSV?")
         for j in sorted(J):
             if j in p and j in q:
                 print(f"  Task {j}: p={float(p[j]):.2f}, q={float(q[j]):.2f}, end_s={place.get(j)}")
@@ -387,7 +388,7 @@ def compare_pq(
 ) -> None:
     """
     milp_pq / eval_pq: {task_id: (p, q)}
-    杈撳嚭 p/q 涓嶄竴鑷寸殑浠诲姟锛屾寜 |dq| 浠庡ぇ鍒板皬鎺掑簭锛屼究浜庡畾浣嶁€滃摢涓€姝ユ妸鏃堕棿鎺ㄨ繜浜嗏€濄€?
+     p/q  |dq| ?
     """
     keys = sorted(set(milp_pq.keys()) | set(eval_pq.keys()))
     rows = []
@@ -427,24 +428,24 @@ def compare_pick_start0_milp_vs_eval(
     topk: int = 30,
 ):
     """
-    鐢?MILP 鐨?layer=0 鐨?p 鍙嶆帹鍑?pick_start_0锛?
+    ?MILP ?layer=0 ?p ?pick_start_0?
         pick0_milp(j) = p_milp(j, layer=0) - d(home_before(j), j) - D_setup
-    鍐嶄笌 evaluator timeline 鐨?pick_start_0 瀵规瘮銆?
+     evaluator timeline ?pick_start_0 ?
 
-    娉ㄦ剰锛氳繖閲?file_gamma 鐢ㄧ殑鏄€滃綋鍓嶈繖娆′紭鍖栫殑 gamma鈥濓紝浣嗚鍙栫殑鏄?layer_gamma=0銆?
+    ?file_gamma  gamma?layer_gamma=0?
     """
 
     if shelf_data is None or d_s_pi is None:
         print("[PICK0-CHECK] missing shelf_data or d_s_pi; skip.")
         return
 
-    # 鉁?鍏抽敭淇锛氳 鈥滃綋鍓?gamma 鐨勬枃浠垛€濓紝浣嗙瓫 layer=0
+    # ? ?gamma  layer=0
     milp_pq0 = load_milp_pq_from_csv(prefix=prefix, file_gamma=gamma, layer_gamma=0, outdir=outdir)
     if not milp_pq0:
         print("[PICK0-CHECK] missing MILP p/q for layer=0 in CSV.")
         return
 
-    # home_before锛氶摼棣栫敤 shelf_init锛涢摼鍐呯敤 place[prev]
+    # home_before shelf_init place[prev]
     J_set = set(int(x) for x in place.keys())
     home_before: dict[int, int] = {}
     for c, seq in shelf_seq.items():
@@ -462,7 +463,7 @@ def compare_pick_start0_milp_vs_eval(
         for a, b in zip(seq_clean[:-1], seq_clean[1:]):
             home_before[int(b)] = int(place.get(int(a), s_init))
 
-    # evaluator 鐨?pick_start_0 浠?timeline 鎷?
+    # evaluator ?pick_start_0 ?timeline ?
     timeline = evaluator_diag.get("timeline", []) or []
     pick0_eval: dict[int, float] = {}
     for rec in timeline:
@@ -520,11 +521,11 @@ def load_milp_pq_from_csv(
     outdir: str = "solution_exports"
 ) -> dict[int, tuple[float, float]]:
     """
-    璇诲彇浣犲鍑虹殑 p/q CSV锛屾瀯閫?{task_id: (p, q)}銆?
+     p/q CSV?{task_id: (p, q)}?
 
-    - file_gamma: 鐢ㄦ潵閫夋嫨鏂囦欢鍚嶅悗缂€锛屾瘮濡?*_gamma1.csv
-    - layer_gamma: 鑻ユ枃浠堕噷鏈?'gamma' 鍒楋紙allGamma 闀胯〃锛夛紝鍒欒繘涓€姝ョ瓫閫夋煇涓€灞?gamma锛堜緥濡?0/1/2锛?
-                  鑻ヤ负 None锛屽垯涓嶇瓫閫夛紙鐩存帴鏁磋〃璇伙級
+    - file_gamma: ?*_gamma1.csv
+    - layer_gamma: ?'gamma' allGamma ?gamma?0/1/2?
+                   None
     """
     cand_paths = [
         os.path.join(outdir, f"{prefix}_p_q_times_allGamma_gamma{file_gamma}.csv"),
@@ -551,10 +552,10 @@ def load_milp_pq_from_csv(
     col_gamma = pick_col(["gamma", "eval_gamma", "g"])
 
     if col_task is None or col_p is None or col_q is None:
-        print(f"[ALIGN-DETAIL] WARN: p/q CSV 鍒楀悕涓嶅尮閰嶏細{list(df.columns)}")
+        print(f"[ALIGN-DETAIL] WARN: p/q CSV {list(df.columns)}")
         return {}
 
-    # 濡傛灉鏄?allGamma 鏂囦欢涓斾綘鎸囧畾 layer_gamma锛屽氨绛涢€夊眰
+    # ?allGamma  layer_gamma
     if (layer_gamma is not None) and (col_gamma is not None):
         try:
             df = df[df[col_gamma].astype(int) == int(layer_gamma)]
@@ -575,7 +576,7 @@ def load_milp_pq_from_csv(
 
 def align_test_from_bundle_json(
     prefix: str,
-    gamma: int,               # bundle 鏂囦欢鍚嶉噷鐨?source_gamma
+    gamma: int,               # bundle ?source_gamma
     evaluator: RobustEvaluator,
     outdir: str = "solution_exports",
     shelf_data: dict[int, int] | None = None,
@@ -588,10 +589,10 @@ def align_test_from_bundle_json(
     return_diag: bool = False,
 ):
     """
-    璇诲彇 MILP bundle -> evaluator 澶嶇畻 -> 瀵归綈妫€鏌?
-    鏂板鑳藉姏锛?
-      - print_full=True锛氱敤鈥滃彲璇烩€濇柟寮忔墦鍗板畬鏁?timeline/pq 绛夛紙浣犺鐨勯偅绉嶏級
-      - return_diag=True锛氳繑鍥?(diff, eval_ms, milp_cmax, diag, routes, shelf_seq, place)锛屾柟渚垮悗缁仛 milp-eval-lock
+     MILP bundle -> evaluator  -> ?
+    ?
+      - print_full=True?timeline/pq 
+      - return_diag=True?(diff, eval_ms, milp_cmax, diag, routes, shelf_seq, place) milp-eval-lock
     """
     path = os.path.join(outdir, f"{prefix}_bundle_gamma{gamma}.json")
     if not os.path.exists(path):
@@ -614,7 +615,7 @@ def align_test_from_bundle_json(
 
     print(f"[ALIGN-TEST] (bundle) MILP cmax={milp_cmax:.2f} | evaluator(gamma={eval_gamma})={obj_eval_f:.2f} | diff={diff:+.2f}")
 
-    # ====== 瀵煎嚭 evaluator 鐨勫叏閲忎腑闂撮噺 ======
+    # ======  evaluator  ======
     if export_eval_diag and isinstance(diag, dict):
         try:
             export_evaluator_diagnostics(
@@ -633,7 +634,7 @@ def align_test_from_bundle_json(
         except Exception as e:
             print(f"[EXPORT-EVAL] failed: {type(e).__name__}: {e}")
 
-    # ====== 浣犺鐨勨€滃畬鏁村彲璇绘墦鍗扳€?======
+    # ====== ?======
     if print_full and isinstance(diag, dict):
         title = print_tag or f"{export_tag} srcG{gamma} evalG{eval_gamma}"
         print_solution_full_from_diag(
@@ -646,7 +647,7 @@ def align_test_from_bundle_json(
             diag=diag,
         )
 
-    # ====== p/q 瀵归綈缁嗗寲 ======
+    # ====== p/q  ======
     milp_pq = load_milp_pq_from_csv(prefix=prefix, file_gamma=gamma, layer_gamma=eval_gamma, outdir=outdir)
 
     eval_pq: dict[int, tuple[float, float]] = {}
@@ -666,7 +667,7 @@ def align_test_from_bundle_json(
     if milp_pq and eval_pq:
         compare_pq(milp_pq=milp_pq, eval_pq=eval_pq, eps=1e-6, topk=30)
 
-    # ====== pick_start_0 瀵归綈璇婃柇 ======
+    # ====== pick_start_0  ======
     if isinstance(diag, dict):
         sd = shelf_data if shelf_data is not None else getattr(evaluator, "shelf_data", None)
         dsp = d_s_pi if d_s_pi is not None else getattr(evaluator, "d_s_pi", None)
@@ -687,7 +688,7 @@ def align_test_from_bundle_json(
         except Exception as e:
             print(f"[PICK0-CHECK] skipped due to error: {type(e).__name__}: {e}")
 
-    # ====== 淇濈暀浣犲師鏉ョ殑璇婃柇淇℃伅 ======
+    # ======  ======
     if isinstance(diag, dict):
         print("[ALIGN-TEST] feasible =", diag.get("feasible"))
         print("[ALIGN-TEST] penalties =", diag.get("penalties"))
@@ -705,7 +706,7 @@ def align_test_from_bundle_json(
             q2 = {int(k): float(v) for k, v in q_eval.items()}
             if q2:
                 j_star = max(q2, key=lambda jj: q2[jj])
-                print(f"[ALIGN-TEST] evaluator 鐨勭摱棰堜换鍔★細Task {int(j_star)}  q={float(q2[j_star]):.2f}")
+                print(f"[ALIGN-TEST] evaluator Task {int(j_star)}  q={float(q2[j_star]):.2f}")
         except Exception:
             pass
 
@@ -715,13 +716,13 @@ def align_test_from_bundle_json(
     return diff
 
 
-# ====== 鏋勯€犱紭鍖栭渶瑕佺殑鏁版嵁缁撴瀯 ======
+# ======  ======
 def build_task_structures(tasks_df: pd.DataFrame,
                           agv_data: dict[int, int],
                           shelf_ids: list[int]):
     need = {"Task", "Shelf", "Workstation", "Duration"}
     if not need.issubset(tasks_df.columns):
-        raise ValueError(f"tasks_df 缂哄皯鍒楋細{need - set(tasks_df.columns)}")
+        raise ValueError(f"tasks_df {need - set(tasks_df.columns)}")
     if tasks_df.isna().any().any():
         raise ValueError("tasks_df has NaN values; please clean inputs first.")
 
@@ -734,7 +735,7 @@ def build_task_structures(tasks_df: pd.DataFrame,
         J.add(tid)
         shelf_usage[sid].append(tid)
 
-    # 铏氭嫙浠诲姟
+    # 
     J0, Jd = {}, {}
     for aid in agv_data:
         J0[aid] = 1000 + int(aid)
@@ -744,7 +745,7 @@ def build_task_structures(tasks_df: pd.DataFrame,
         task_shelf_mapping[J0[aid]] = None
         task_shelf_mapping[Jd[aid]] = None
 
-    # 璐ф灦鍒濆铏氭嫙
+    # 
     J_I, shelf_virtual_tasks = {}, {}
     for sid in shelf_ids:
         vt = 3000 + int(sid)
@@ -768,7 +769,7 @@ def export_task_inputs_for_sim(prefix: str, tasks_df: pd.DataFrame,
     shelf_df = tasks_df[["Task", "Shelf"]].copy()
     info_df.to_csv(os.path.join(outdir, f"{prefix}_taskInfo.csv"), index=False)
     shelf_df.to_csv(os.path.join(outdir, f"{prefix}_taskShelf.csv"), index=False)
-    print(f"[EXPORT] 鍐欏嚭 solution_exports/{prefix}_taskInfo.csv, solution_exports/{prefix}_taskShelf.csv")
+    print(f"[EXPORT]  solution_exports/{prefix}_taskInfo.csv, solution_exports/{prefix}_taskShelf.csv")
 
 
 def parse_gamma_list(s: str) -> list[int]:
@@ -872,16 +873,16 @@ def build_warm_hint_from_eval(
     warm_hint:
       - w, x, z, v, immediate
       - p/q start
-      - g/h start  (鍏抽敭锛歨 琛ㄧず鈥滆揣鏋跺湪璇?cell 涓婂仠鐣欑粨鏉熸椂闂粹€濓紝涓嶆槸鍒拌揪鏃堕棿)
+      - g/h start  ( ?cell )
 
     place_override:
-      - 鑻ユ彁渚涳紝鍒?x 鐩存帴鐢ㄨ繖涓紙纭繚鈥滈攣浣?MILP 鐨?x鈥濓級锛岃€屼笉鏄敤 evaluator 鐨?end_shelf_final锛堥伩鍏?evaluator repair 鏀瑰啓 x锛夈€?
+      - ?x ?MILP ?x evaluator ?end_shelf_final?evaluator repair  x?
     """
     BIG_M_TIME = 10000.0
 
     warm_hint: dict = {}
 
-    # ---- w: 浠诲姟 -> AGV ----
+    # ---- w:  -> AGV ----
     w_map: dict[int, int] = {}
     for r, seq in routes.items():
         rr = int(r)
@@ -891,7 +892,7 @@ def build_warm_hint_from_eval(
                 w_map[jj] = rr
     warm_hint["w"] = w_map
 
-    # ---- z: 瀹屾暣 j0 -> ... -> jd ----
+    # ---- z:  j0 -> ... -> jd ----
     z_list: list[tuple[int, int, int]] = []
     for r, seq in routes.items():
         rr = int(r)
@@ -908,7 +909,7 @@ def build_warm_hint_from_eval(
             z_list.append((int(prev), int(jd), rr))
     warm_hint["z"] = z_list
 
-    # ---- v: evaluator 鎺ㄥ鐨?V_arcs ----
+    # ---- v: evaluator ?V_arcs ----
     V_raw = details.get("V_arcs", []) or []
     v_list: list[tuple[int, int, int, int]] = []
     for arc in V_raw:
@@ -918,17 +919,17 @@ def build_warm_hint_from_eval(
         v_list.append((int(i), int(j), int(s), int(sp)))
     warm_hint["v"] = v_list
 
-    # ---- x: 浠诲姟鍥炲簱浣嶏紙EndShelf锛?----
+    # ---- x: EndShelf?----
     x_map: dict[int, int] = {}
 
     if place_override is not None:
-        # 鉁?寮哄埗浣跨敤 MILP 鐨?x锛堟垨浣犳兂閿佷綇鐨?place锛?
+        # ? MILP ?x?place?
         for j, s in (place_override or {}).items():
             jj = int(j)
             if jj in J:
                 x_map[jj] = int(s)
     else:
-        # fallback锛氫娇鐢?evaluator 鐨?end_shelf_final
+        # fallback?evaluator ?end_shelf_final
         end_final = details.get("end_shelf_final", {}) or {}
         for j, s in end_final.items():
             jj = int(j)
@@ -954,13 +955,13 @@ def build_warm_hint_from_eval(
     if imm_edges:
         warm_hint["immediate"] = imm_edges
 
-    # ---- p/q: 鐩存帴鐢?evaluator 鐨?p/q ----
+    # ---- p/q: ?evaluator ?p/q ----
     p_map = {int(j): float(t) for j, t in (details.get("p", {}) or {}).items() if int(j) in J}
     q_map = {int(j): float(t) for j, t in (details.get("q", {}) or {}).items() if int(j) in J}
     warm_hint["p"] = p_map
     warm_hint["q"] = q_map
 
-    # ========== 鍏抽敭锛氭瀯閫?g/h ==========
+    # ========== ?g/h ==========
     timeline = details.get("timeline", []) or []
     rec_by_task: dict[int, dict] = {}
     for rec in timeline:
@@ -1006,7 +1007,7 @@ def build_warm_hint_from_eval(
         except Exception:
             return 0.0
 
-    # 閾惧唴鍚庣户銆佸熬浠诲姟
+    # 
     succ_chain: dict[int, int] = {}
     chain_of: dict[int, int] = {}
     tail_of_chain: dict[int, int] = {}
@@ -1025,7 +1026,7 @@ def build_warm_hint_from_eval(
     g_map: dict[tuple[int, int, int], float] = {}
     h_map: dict[tuple[int, int, int], float] = {}
 
-    # (1) 鐪熷疄浠诲姟锛歡=鍒拌揪 end cell 鐨勬椂闂达紱h=璇?cell 鍋滅暀缁撴潫锛堜笅涓€娆¤鍙栬蛋 / 鎴?BIG_M锛?
+    # (1) = end cell h=?cell  / ?BIG_M?
     for j, s in x_map.items():
         jj = int(j)
         ss = int(s)
@@ -1048,7 +1049,7 @@ def build_warm_hint_from_eval(
         g_map[(jj, 0, ss)] = float(g)
         h_map[(jj, 0, ss)] = float(h)
 
-    # (2) 铏氭嫙鍒濆浠诲姟 J_I锛歡=0锛沨=璇ラ摼棣栦换鍔＄殑 pick_start锛堣〃绀哄垵濮嬪崰鐢ㄧ粨鏉燂級
+    # (2)  J_I=0= pick_start
     for c, vt in (J_I or {}).items():
         cc = int(c)
         vt_id = int(vt)
@@ -1090,7 +1091,7 @@ def build_warm_hint_from_eval(
 
 def _bundle_intify(bundle: dict) -> dict:
     """
-    鎶?bundle 鐨?routes/shelf_seq/place/cell_sigma 閲?key/value 缁熶竴杞?int
+    ?bundle ?routes/shelf_seq/place/cell_sigma ?key/value ?int
     """
     routes_raw = bundle.get("routes") or bundle.get("routes_by_agv") or {}
     shelf_seq_raw = bundle.get("shelf_seq") or {}
@@ -1161,8 +1162,8 @@ def build_cell_sigma_from_event_run(
     J_set: Set[int],
 ) -> Dict[int, List[int]]:
     """
-    鐢?event gate 妯″紡璇勪及涓€娆★紝鎶藉彇姣忎釜 cell 鐨勨€滃疄闄呯珯浣嶉『搴?蟽[cell]=[task,...]鈥?
-    鎺掑簭瑙勫垯锛氭寜 arrive_cell_act锛堝疄闄呰惤浣嶅紑濮嬪崰鐢ㄦ椂鍒伙級鍗囧簭銆?
+    ?event gate  cell ?[cell]=[task,...]?
+     arrive_cell_act?
     """
     ev = evaluator_factory(int(eval_gamma), cell_sigma=None)
     ms, diag = ev.evaluate(routes, shelf_seq, place, verbose=False)
@@ -1212,13 +1213,13 @@ def run_cross_gamma_check(
     export_fail_diag: bool = True,
 ):
     """
-    瀵规瘡涓?source_gamma 鐨?bundle锛屽湪 eval_gammas 涓嬮兘璺戜竴閬?evaluator.evaluate(...)
-    瀵煎嚭锛?
-      - {prefix}_crossGamma_{tag}_suite.csv  (闀胯〃)
-      - {prefix}_crossGamma_{tag}_matrix.csv (鐭╅樀)
+    ?source_gamma ?bundle eval_gammas ?evaluator.evaluate(...)
+    ?
+      - {prefix}_crossGamma_{tag}_suite.csv  ()
+      - {prefix}_crossGamma_{tag}_matrix.csv ()
 
-    鏂板锛氬綋鏌愪釜 (src_g, eval_g) 璇勪及涓?inf 鎴?feasible=False 鏃讹紝鑷姩瀵煎嚭璇ユ evaluator diag锛?
-         鏂囦欢鍓嶇紑锛歿prefix}_crossFail_{tag}_srcG{src_g}_evalG{eval_g}_*
+     (src_g, eval_g) ?inf ?feasible=False  evaluator diag?
+         prefix}_crossFail_{tag}_srcG{src_g}_evalG{eval_g}_*
     """
     os.makedirs(outdir, exist_ok=True)
 
@@ -1261,7 +1262,7 @@ def run_cross_gamma_check(
                 except Exception:
                     place_changed_cnt = None
 
-            # === 鏂板锛歩nf/涓嶅彲琛屾椂瀵煎嚭 diag锛堢敤浜庡畾浣嶁€滅垎鎺夊師鍥犫€濓級 ===
+            # === nf/ diag ===
             is_bad = (not math.isfinite(float(ms))) or (feasible is False)
             if export_fail_diag and is_bad and isinstance(diag, dict):
                 try:
@@ -1320,7 +1321,7 @@ def run_cross_gamma_check(
 # ============================================================
 
 _RE_EXACT = re.compile(
-    r"\[ALNS\]\s*Exact makespan:\s*base=([^\s]+)\s*(?:鈫抾->)\s*best=([^\s]+)",
+    r"\[ALNS\]\s*Exact makespan:\s*base=([^\s]+)\s*(?:->)\s*best=([^\s]+)",
     re.IGNORECASE
 )
 _RE_WARM = re.compile(
@@ -1472,7 +1473,7 @@ def run_quick_benchmark_subprocess(args) -> int:
             g = int(g)
             sd = int(sd)
 
-            # 鍏抽敭锛氶槻姝㈣鍒扳€滀笂涓€娆?run 鐨勬棫 bundle鈥?
+            # ?run  bundle?
             bundle_path = _bench_bundle_path(root, str(args.prefix), g)
             try:
                 if bundle_path.exists():
@@ -1529,18 +1530,18 @@ def run_quick_benchmark_subprocess(args) -> int:
                 out_text = f"[BENCH] EXCEPTION: {type(e).__name__}: {e}"
                 exit_code = 125
 
-            # 鍏堜粠 stdout 鎶?profiler / warm/exact锛堝彲閫夛級
+            #  stdout ?profiler / warm/exact
             met = _extract_metrics_from_stdout(out_text)
             final_src = "stdout"
 
-            # 鉁?鏈€绋筹細浼樺厛浠?bundle JSON 璇?cmax
+            # ??bundle JSON ?cmax
             cmax_bundle = _bench_try_read_bundle_cmax(bundle_path)
             if cmax_bundle is not None:
                 met["final_ms"] = float(cmax_bundle)
                 met["feasible"] = bool(_bench_is_finite(met["final_ms"]))
                 final_src = "bundle"
 
-            # 瀛愯繘绋嬪け璐ワ細寮哄埗鍒ゅけ璐?
+            # ?
             if exit_code != 0:
                 met["feasible"] = False
                 met["final_ms"] = float("inf")
@@ -1548,7 +1549,7 @@ def run_quick_benchmark_subprocess(args) -> int:
 
             print(f"[BENCH] done  gamma={g} seed={sd} exit={exit_code} final_ms={met['final_ms']} src={final_src} wall={wall:.2f}s")
 
-            # 濡傛灉澶辫触锛岄『鎵嬭惤涓€涓棩蹇楋紝鏂逛究浣犲洖鐪嬫槸鍝潯绾︽潫鐖嗘帀浜?
+            # ?
             if (not _bench_is_finite(met["final_ms"])) or exit_code != 0:
                 try:
                     log_path = root / f"bench_quick_{args.prefix}_g{g}_s{sd}.log"
@@ -1777,7 +1778,7 @@ def main():
     ap.add_argument(
         "--export-eval-diag",
         action="store_true",
-        help="瀵煎嚭 ALNS 瑙ｇ殑 evaluator diag/timeline/pq/robust_segments/v_arcs 鍒?solution_exports/",
+        help=" ALNS  evaluator diag/timeline/pq/robust_segments/v_arcs ?solution_exports/",
     )
     ap.add_argument(
         "--verbose",
@@ -1830,7 +1831,7 @@ def main():
     history_seed_flag = int(getattr(args, "alns_history_seed", 1) or 0)
     multistart_restarts_flag = max(1, int(getattr(args, "alns_multistart_restarts", 2) or 1))
 
-    # 鉁?鍙仛 ALNS锛氬彧闇€瑕佽繖涓€涓鍣?
+    # ? ALNS?
     alns_bundles_by_gamma: dict[int, dict] = {}
 
     scen_dir = os.path.join("scenario", prefix)
@@ -1840,12 +1841,12 @@ def main():
 
 
 
-    # 鍦板浘
+    # 
     shelf_data, agv_data, ws_indices, sp_indices, W, H = load_map_csv(prefix)
 
-    # 浠诲姟
+    # 
     tasks_df = pd.read_csv(tasks_csv)
-    print(f"[TASK] 璇诲彇 tasks.csv 琛屾暟={len(tasks_df)}, WS闆嗗悎={sorted(tasks_df['Workstation'].unique())}")
+    print(f"[TASK]  tasks.csv ={len(tasks_df)}, WS={sorted(tasks_df['Workstation'].unique())}")
     if len(tasks_df) != 11:
         print(f"[WARN] tasks.csv has {len(tasks_df)} tasks (expected 11); continue solving.")
     if "WSOrder" not in tasks_df.columns:
@@ -1893,7 +1894,7 @@ def main():
 
     export_task_inputs_for_sim(prefix, tasks_df)
 
-    # 瑙勫垯鍒濊В
+    # 
     pi = {j: tasks[j][0] for j in J}
     init_sol = build_initial_solution_basic(
         J=J, R=R,
@@ -1917,7 +1918,7 @@ def main():
     if shelf_seq_intermediate_mode:
         print("[ALNS] shelf_seq-as-intermediate mode ON: fixed derived shelf order (ws + task->shelf).")
 
-    # 璺濈涓?螖锛堢粰璇勪及鍣級
+    # ?
     d_s_pi, d_pi_s, d_s_s = {}, {}, {}
     for s in S:
         for j in J:
@@ -1932,7 +1933,7 @@ def main():
     Delta_pi_s = {k: d_pi_s[k] for k in d_pi_s}
     Delta_s_s  = {k: d_s_s[k]  for k in d_s_s}
 
-    # 姣忎釜浠诲姟鐨勨€滃伐浣嶆渶杩戝墠 m 涓偍浣嶁€濓紙ALNS 鐢ㄥ畠鏉ユ灇涓?x锛?
+    #  m ALNS ?x?
     m = 8
     S_near_by_j = {j: sorted(S, key=lambda s: d_pi_s[(j, s)])[:min(m, len(S))] for j in J}
     chain_repair_iters_hard = max(24, min(160, 2 * len(J)))
@@ -1947,7 +1948,7 @@ def main():
 
     def evaluator_factory_for_cross(eval_gamma: int,
                                     cell_sigma: Optional[Dict[int, List[int]]] = None) -> RobustEvaluator:
-        # cross-gamma锛氳鈥滃彲姣斺€濓紝鎵€浠ョ敤 event gate + 鍙€?蟽 鏉ラ攣姝?cell 绔欎綅椤哄簭
+        # cross-gamma event gate + ? ?cell 
         sigma_eff: Optional[Dict[int, List[int]]] = None
         if isinstance(cell_sigma, dict) and len(cell_sigma) > 0:
             sigma_eff = {int(s): [int(x) for x in (seq or [])] for s, seq in cell_sigma.items()}
@@ -1991,7 +1992,7 @@ def main():
             mode="exact",
         )
 
-    # 鎵撳嵃 ALNS 缁撴瀯瑙?
+    #  ALNS ?
     def print_alns_solution(gamma_val: int, sol, evaluator: RobustEvaluator):
         ms, diag = evaluator.evaluate(sol.routes, sol.shelf_seq, sol.place)
         p = diag.get("p", {}); q = diag.get("q", {})
@@ -2015,12 +2016,12 @@ def main():
             print(f"    Task {j}: p[{p[j]:.2f}] | q[{q[j]:.2f}]  end_s={end_final.get(j, 'NA')}")
 
         if V_arcs:
-            print("\n  v[i,j,s,s'] = 1 锛堣瘎浼板櫒鎺ㄥ锛岀敤浜庤瘖鏂級")
+            print("\n  v[i,j,s,s'] = 1 ")
             for (i, jj, s, sp) in V_arcs:
                 print(f"    v[{i},{jj},{s},{sp}] = 1")
 
         if timeline:
-            print("\n  --- Timeline (璇﹀敖) ---")
+            print("\n  --- Timeline () ---")
             timeline_sorted = sorted(timeline, key=lambda rec: (rec["ws_start"], rec["Task"]))
             for rec in timeline_sorted:
                 print(
@@ -2035,8 +2036,8 @@ def main():
                 )
         print("----------------------------------------------------------------------\n")
 
-    # 閫?纬 姹傝В
-    # 閫?纬 姹傝В锛堝彧璺?ALNS锛?
+    # ? 
+    # ? ?ALNS?
     prev_best_sol: InitialSolution | None = None
     for g in gamma_list:
         print("\n" + "=" * 70)
@@ -2059,9 +2060,9 @@ def main():
         if no_seed and requested_profile == "turbo":
             print("[ALNS] no-seed mode: force balanced profile for from-scratch feasibility.")
 
-        # ========= Fast evaluator锛堢粰 ALNS 鍐呭眰鐢級=========
-        # ========= Fast evaluator锛堢粰 ALNS 鍐呭眰鐢級=========
-        # ========= Fast evaluator锛堢粰 ALNS 鍐呭眰鐢級=========
+        # ========= Fast evaluator ALNS =========
+        # ========= Fast evaluator ALNS =========
+        # ========= Fast evaluator ALNS =========
         evaluator_fast = RobustEvaluator(
             J=J, R=R, S=S,
             pi=pi,
@@ -2077,7 +2078,7 @@ def main():
             detach_on_mismatch=False,
             envelope_shared_resources=True,
 
-            # --- turbo 涓嬪紑灏忔淇锛岄伩鍏嶄竴鐩村仠鐣欏湪鈥滀笉鍙鎯╃綒鍖衡€?---
+            # --- turbo ?---
             enable_chain_repair=bool(fast_post_mode),
             chain_repair_max_iters=(2 if fast_post_mode else 0),
             enable_cell_repair=bool(fast_post_mode),
@@ -2130,7 +2131,7 @@ def main():
             mode="exact",
         )
 
-        # ========= Exact evaluator锛圓LNS 缁撴潫鍚庢牳楠?瀵煎嚭鐢級=========
+        # ========= Exact evaluatorLNS ?=========
         evaluator_exact = RobustEvaluator(
             J=J, R=R, S=S,
             pi=pi,
@@ -2146,7 +2147,7 @@ def main():
             detach_on_mismatch=False,
             envelope_shared_resources=True,
 
-            # --- Exact锛氬厑璁镐慨澶嶏紙瀵归綈 MILP / cross-gamma 鍙瘮锛?---
+            # --- Exact MILP / cross-gamma ?---
             enable_chain_repair=True,
             chain_repair_max_iters=chain_repair_iters_hard,
             enable_cell_repair=True,
@@ -2314,7 +2315,7 @@ def main():
             if not math.isfinite(float(forced_seed_ms)):
                 print("[ALNS] warning: exact feasible seed not found yet; ALNS will continue from best-available structure.")
 
-        # ========= 璋冪敤 ALNS锛圥rofiler 鍖?fast evaluator锛?========
+        # =========  ALNSrofiler ?fast evaluator?========
         total_budget = float(getattr(args, "alns_time_budget_sec", 0.0) or 0.0)
         if args.alns_iters and args.alns_iters > 0:
             search_evaluator = evaluator_fast
@@ -2462,7 +2463,7 @@ def main():
             init_sol_best = init_sol
             budget_stage2 = 0.0
 
-        # ========= 绗?0 灞傜粨鏋勬鏌ワ紙鐢?exact锛?========
+        # ========= ?0 ?exact?========
         from alns_min import basic_feasibility_check_level0
         _ = basic_feasibility_check_level0(
             routes=init_sol_best.routes,
@@ -2473,7 +2474,7 @@ def main():
             verbose=verbose_flag,
         )
 
-        # ========= 璇勪及 makespan =========
+        # =========  makespan =========
         base_ms, _ = evaluator_exact.evaluate(init_sol.routes, init_sol.shelf_seq, init_sol.place)
         best_ms, best_diag = evaluator_exact.evaluate(
             init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
@@ -2687,10 +2688,10 @@ def main():
             print_alns_solution(g, init_sol_best, evaluator_exact)
 
         if fast_post_mode:
-            # turbo锛氳烦杩?WS-fix 浜屾閲嶈瘎浼颁笌 full diag锛岀洿鎺ヨ惤 bundle锛屼紭鍏堥€熷害
+            # turbo?WS-fix  full diag bundle
             ms_final, diag_final = float(best_ms), best_diag
         else:
-            # === WS 鍧楀唴閲嶆帓涓€娆★紙璁╃粨鏋勬洿绋冲畾锛涗篃璁?bundle 鏇寸ǔ瀹氾級 ===
+            # === WS ?bundle  ===
             routes_wsfix: dict[int, list[int]] = {}
             for r, seq in init_sol_best.routes.items():
                 routes_wsfix[int(r)] = reorder_contiguous_ws_blocks(seq, pi, ws_fixed_seq)
@@ -2708,7 +2709,7 @@ def main():
                     if int(j) in J:
                         init_sol_best.place[int(j)] = int(s)
 
-            # 鍐嶇畻涓€娆★紝纭繚 diag 涓庢渶缁?place 涓€鑷达紙鍙湪闇€瑕佸鍑?璇︾粏鏃舵墠鍋氾級
+            #  diag ?place ?
             if need_full_diag:
                 ms_final, diag_final = evaluator_exact.evaluate(
                     init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
@@ -2718,25 +2719,25 @@ def main():
 
         prev_best_sol = init_sol_best
 
-        # ===== 淇濆瓨 ALNS bundle锛坈ross-gamma 鐢級=====
+        # =====  ALNS bundleross-gamma =====
         if fast_post_mode:
             cell_sigma = {}
         else:
-            # 1) 鐢?event gate 璺戜竴娆★紝鎶?蟽锛堢珯浣嶉『搴忥級
+            # 1) ?event gate ?
             cell_sigma = build_cell_sigma_from_event_run(
                 evaluator_factory=evaluator_factory_for_cross,
-                eval_gamma=int(g),  # 鐢ㄢ€滃綋鍓?gamma 鐨?event 浠跨湡鈥濇娊椤哄簭
+                eval_gamma=int(g),  # ?gamma ?event 
                 routes=init_sol_best.routes,
                 shelf_seq=init_sol_best.shelf_seq,
                 place=init_sol_best.place,
                 J_set=set(int(x) for x in J),
             )
 
-            # 鍙€夛細浣犲叧蹇冪殑 cell=23 鎵撳嵃鍑烘潵鐪嬬湅
+            #  cell=23 
             if 23 in cell_sigma:
                 print(f"[SIGMA] srcG={g} cell=23 order={cell_sigma[23]}")
 
-        # 2) 鍐欏叆 bundle
+        # 2)  bundle
         alns_path = save_bundle_json(
             prefix=prefix,
             tag="alns",
@@ -2759,7 +2760,7 @@ def main():
             except Exception as e:
                 print(f"[ALNS] turbo cache update failed: {type(e).__name__}: {e}")
 
-        # ===== 鍙€夛細瀵煎嚭 evaluator diag锛圓LNS-only 鐗堬級=====
+        # =====  evaluator diagLNS-only =====
         if args.export_eval_diag and isinstance(diag_final, dict):
             try:
                 export_evaluator_diagnostics(
@@ -2780,10 +2781,10 @@ def main():
                 print(f"[EXPORT-EVAL] ALNS export failed: {type(e).__name__}: {e}")
 
 # =========================
-# Cross-gamma 妫€鏌ワ紙缁熶竴璺戯級
+# Cross-gamma 
     # =========================
     # =========================
-    # Cross-gamma 妫€鏌ワ紙鍙 ALNS锛?
+    # Cross-gamma  ALNS?
     # =========================
     if args.cross_gamma_check:
         print("\n" + "=" * 70)
@@ -2797,7 +2798,7 @@ def main():
                 bundles_by_source_gamma=alns_bundles_by_gamma,
                 eval_gammas=gamma_list,
                 evaluator_factory=evaluator_factory_for_cross,
-                milp_opt_by_eval_gamma=None,   # 鉁?ALNS-only锛氫笉绠?regret
+                milp_opt_by_eval_gamma=None,   # ?ALNS-only?regret
                 outdir="solution_exports",
             )
         else:
