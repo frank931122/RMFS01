@@ -42,7 +42,7 @@ def basic_feasibility_check_level0(
             if jj not in all_tasks:
                 ok = False
                 if verbose:
-                    print(f"[Lv0-Check] ERROR: AGV {r} route [text_corrupted]{jj}")
+                    print(f"[Lv0-Check] ERROR: AGV {r} route contains unknown task {jj}")
             else:
                 appear_cnt[jj] += 1
 
@@ -54,7 +54,7 @@ def basic_feasibility_check_level0(
         elif appear_cnt[j] > 1:
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: [text_corrupted] {j} [text_corrupted]routes [text_corrupted] {appear_cnt[j]} [text_corrupted](>1)")
+                print(f"[Lv0-Check] ERROR: task {j} appears in routes {appear_cnt[j]} times (>1)")
 
     # 2) Validate no duplicates within each route
     for r, seq in routes.items():
@@ -64,7 +64,7 @@ def basic_feasibility_check_level0(
             if jj in seen:
                 ok = False
                 if verbose:
-                    print(f"[Lv0-Check] ERROR: AGV {r} [text_corrupted]route [text_corrupted]{jj} [text_corrupted]")
+                    print(f"[Lv0-Check] ERROR: AGV {r} route has duplicated task {jj}")
             seen.add(jj)
 
     # 3) Validate shelf_seq against mapping
@@ -78,8 +78,8 @@ def basic_feasibility_check_level0(
                     ok = False
                     if verbose:
                         print(
-                            f"[Lv0-Check] ERROR: shelf_seq [text_corrupted] {cc} [text_corrupted]{jj}, "
-                            f"[text_corrupted]task_shelf_mapping[{jj}] = {c_expect}"
+                            f"[Lv0-Check] ERROR: shelf_seq chain {cc} contains task {jj}, "
+                            f"but task_shelf_mapping[{jj}] = {c_expect}"
                         )
 
         shelf_cover: Dict[int, Set[int]] = {
@@ -93,8 +93,8 @@ def basic_feasibility_check_level0(
                 ok = False
                 if verbose:
                     print(
-                        f"[Lv0-Check] ERROR: [text_corrupted] {j} [text_corrupted] {c_expect}, "
-                        f"[text_corrupted]shelf_seq[{c_expect}] [text_corrupted]"
+                        f"[Lv0-Check] ERROR: task {j} expects chain {c_expect}, "
+                        f"but shelf_seq[{c_expect}] does not include it"
                     )
 
     # 4) Validate placement map
@@ -104,18 +104,18 @@ def basic_feasibility_check_level0(
         if jj not in all_tasks:
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: place [text_corrupted]{jj}")
+                print(f"[Lv0-Check] ERROR: place contains unknown task {jj}")
         if ss not in all_cells:
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: place[{jj}] = {ss} [text_corrupted]cell")
+                print(f"[Lv0-Check] ERROR: place[{jj}] = {ss} is not a valid cell")
 
     # 5) Every routed task must have a placement
     for j in all_tasks:
         if appear_cnt[j] > 0 and (j not in place):
             ok = False
             if verbose:
-                print(f"[Lv0-Check] ERROR: [text_corrupted] {j} [text_corrupted]routes [text_corrupted]place [text_corrupted]")
+                print(f"[Lv0-Check] ERROR: task {j} is in routes but missing in place map")
 
     if verbose:
         if ok:
@@ -221,12 +221,12 @@ def _sanitize_task_shelf_mapping(
     bad = 0
 
     for j, c in task_shelf_mapping.items():
-        # [text_corrupted] None
+        # TODO None
         if c is None:
             bad += 1
             continue
 
-        # [text_corrupted] NaN[text_corrupted] pandas [text_corrupted]
+        # TODO NaN[text_corrupted] pandas [text_corrupted]
         try:
             if isinstance(c, float) and math.isnan(c):
                 bad += 1
@@ -394,7 +394,7 @@ def _normalize_one_route_shelf_slots(
         order = shelf_idx.get(int(c), {})
         tlist = tasks.get(int(c), [])
 
-        # [text_corrupted] shelf_seq [text_corrupted]
+        # TODO shelf_seq [text_corrupted]
         tlist.sort(key=lambda t: order.get(int(t), 10**9))
 
         for idx, t in zip(pos_list, tlist):
@@ -453,12 +453,12 @@ def _infeas_components(details, evaluator):
 
 def _infeas_key(details, evaluator):
     unscheduled, tail, cell_measure = _infeas_components(details, evaluator)
-    # [text_corrupted]0.01 [text_corrupted]float [text_corrupted]
+    # TODO0.01 [text_corrupted]float [text_corrupted]
     cell_score = int(round(cell_measure * 100))
     return (unscheduled, tail, cell_score)
 
 def _infeas_scalar(details, evaluator):
-    # [text_corrupted] 1e4 [text_corrupted]
+    # TODO 1e4 [text_corrupted]
     unscheduled, tail, cell_measure = _infeas_components(details, evaluator)
     return float(unscheduled) * 1e4 + float(tail) * 1e2 + float(cell_measure)
 
@@ -932,7 +932,7 @@ class FastProxyEvaluatorLB:
             j = int(j)
             end_s = place_i.get(j, None)
             if end_s is None:
-                # [text_corrupted]0 [text_corrupted]
+                # TODO0 [text_corrupted]
                 return 0.0
             end_s = int(end_s)
 
@@ -1016,7 +1016,7 @@ def normalize_solution_by_ws_rank_once(
     routes_new = _dc_routes(routes0)
     for r, seq in routes_new.items():
         seq2 = [int(x) for x in seq]
-        # [text_corrupted] tie-break
+        # TODO tie-break
         tagged = [(idx, j) for idx, j in enumerate(seq2)]
         tagged.sort(key=lambda it: (rank(it[1]), int(evaluator.pi.get(it[1], -1)), it[0]))
         routes_new[int(r)] = [j for _, j in tagged]
@@ -1199,7 +1199,7 @@ def _augment_shelf_candidates(
     rng: random.Random,
     force_all_shelves: bool = False,
     extra_random_shelves: int = 0,
-    cap_total: int = 40,   # [text_corrupted]
+    cap_total: int = 40,   # TODO
 ) -> List[int]:
     """
     [text_corrupted]base_cands [text_corrupted] cap_total[text_corrupted]|S| [text_corrupted]
@@ -1208,7 +1208,7 @@ def _augment_shelf_candidates(
     all_s = [int(s) for s in evaluator.S]
 
     if force_all_shelves:
-        # [text_corrupted] S[text_corrupted] cap_total[text_corrupted]
+        # TODO S[text_corrupted] cap_total[text_corrupted]
         if len(cand_set) < cap_total:
             pool = [s for s in all_s if s not in cand_set]
             need = cap_total - len(cand_set)
@@ -1329,7 +1329,7 @@ def destroy_ws_gap_route_bundle(
     k = max(int(min_k), 1)
     k = min(k, max_k_eff)
 
-    # [text_corrupted] best_cur [text_corrupted] Task1 [text_corrupted]
+    # TODO best_cur [text_corrupted] Task1 [text_corrupted]
     start = max(0, int(idx) - (k - 1))
     start = min(start, L - k)
     segment = [int(x) for x in seq_hit[start : start + k]]
@@ -1401,12 +1401,12 @@ def intensify_close_largest_ws_gap_once(
 
     j_move = int(best_cur)
 
-    # [text_corrupted] j_move
+    # TODO j_move
     routes_removed = _dc_routes(routes)
     for r in list(routes_removed.keys()):
         routes_removed[r] = [x for x in routes_removed[r] if int(x) != j_move]
 
-    # [text_corrupted]
+    # TODO
     cand_s = _cand_end_shelves_for_task(
         j_move,
         place=place,
@@ -1536,7 +1536,7 @@ def destroy_ws_largest_idle_gap(
     max_k_eff = min(int(max_k), L)
     k = int(rng.randint(int(min_k), int(max_k_eff)))
 
-    # [text_corrupted] (best_idx-1, best_idx)
+    # TODO (best_idx-1, best_idx)
     left = max(0, best_idx - 1 - (k // 2))
     left = min(left, L - k)
     removed_order = best_seq[left : left + k]
@@ -1554,16 +1554,16 @@ def destroy_robust_sensitive_bundle(
     evaluator: RobustEvaluator,
     rng: random.Random,
     task_shelf_mapping: Optional[Dict[int, int]] = None,
-    # [text_corrupted]seed [text_corrupted]
+    # TODOseed [text_corrupted]
     pre_k: int = 2,
-    # [text_corrupted]chain_nei [text_corrupted]
+    # TODOchain_nei [text_corrupted]
     chain_nei: int = 1,
-    # [text_corrupted]WS [text_corrupted]ws_nei [text_corrupted]
+    # TODOWS [text_corrupted]ws_nei [text_corrupted]
     ws_nei: int = 1,
-    # [text_corrupted]
+    # TODO
     min_k: int = 2,
     max_k: int = 5,
-    # [text_corrupted]top_m [text_corrupted]seed[text_corrupted]
+    # TODOtop_m [text_corrupted]seed[text_corrupted]
     top_m: int = 8,
 ) -> Tuple[List[int], Set[int], Dict[int, List[int]]]:
     """
@@ -1594,14 +1594,14 @@ def destroy_robust_sensitive_bundle(
     if not present:
         return [], set(), routes
 
-    # [text_corrupted]q/q0[text_corrupted]evaluate[text_corrupted]
+    # TODOq/q0[text_corrupted]evaluate[text_corrupted]
     routes_norm = _normalize_ws_blocks(routes, evaluator)
     _, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
 
     q_raw = (diag.get("q", {}) if isinstance(diag, dict) else {}) or {}
     q0_raw = (diag.get("q0", {}) if isinstance(diag, dict) else {}) or {}
 
-    # [text_corrupted] key=int
+    # TODO key=int
     try:
         q_map = {int(k): float(v) for k, v in q_raw.items()}
     except Exception:
@@ -1611,18 +1611,18 @@ def destroy_robust_sensitive_bundle(
     except Exception:
         q0_map = {}
 
-    # [text_corrupted] slack = q - q0
+    # TODO slack = q - q0
     slack: Dict[int, float] = {}
     for j in present:
         if j in q_map:
-            base0 = q0_map.get(j, q_map[j])  # [text_corrupted] q0[text_corrupted] slack=0
+            base0 = q0_map.get(j, q_map[j])  # TODO q0[text_corrupted] slack=0
             slack[j] = float(q_map[j] - float(base0))
 
-    # [text_corrupted] slack [text_corrupted] 0[text_corrupted] q [text_corrupted]
+    # TODO slack [text_corrupted] 0[text_corrupted] q [text_corrupted]
     if (not slack) or (max(slack.values()) <= 1e-9):
         slack = {j: float(q_map.get(j, 0.0)) for j in present if j in q_map}
 
-    # [text_corrupted] q [text_corrupted]allow_incomplete [text_corrupted] seed
+    # TODO q [text_corrupted]allow_incomplete [text_corrupted] seed
     if not slack:
         seed = int(rng.choice(sorted(present)))
         slack = {seed: 0.0}
@@ -1647,7 +1647,7 @@ def destroy_robust_sensitive_bundle(
     if r_hit is not None and idx_hit is not None and seq_hit:
         start = max(0, idx_hit - max(0, int(pre_k)))
         prefix = [int(x) for x in seq_hit[start:idx_hit]]
-        # [text_corrupted]seed [text_corrupted]
+        # TODOseed [text_corrupted]
         prefix = list(reversed(prefix))
         for x in prefix:
             if x in present:
@@ -1663,7 +1663,7 @@ def destroy_robust_sensitive_bundle(
                 pos = int(seq_c.index(int(seed)))
                 left = seq_c[max(0, pos - int(chain_nei)):pos]
                 right = seq_c[pos + 1: pos + 1 + int(chain_nei)]
-                # [text_corrupted]
+                # TODO
                 left = list(reversed(left))
                 for x in left + right:
                     if int(x) in present:
@@ -1702,7 +1702,7 @@ def destroy_robust_sensitive_bundle(
         if len(removed) >= max_k:
             break
 
-    # [text_corrupted] min_k[text_corrupted] slack [text_corrupted]
+    # TODO min_k[text_corrupted] slack [text_corrupted]
     if len(removed) < min_k:
         ranked_fill = sorted(slack.items(), key=lambda kv: kv[1], reverse=True)
         for j, _ in ranked_fill:
@@ -1725,7 +1725,7 @@ def destroy_robust_sensitive_bundle(
     rest.sort(key=lambda j: float(slack.get(int(j), 0.0)), reverse=True)
     removed_order.extend(rest)
 
-    # [text_corrupted]routes [text_corrupted]removed_set
+    # TODOroutes [text_corrupted]removed_set
     for r in list(routes.keys()):
         routes[int(r)] = [int(j) for j in routes[int(r)] if int(j) not in removed_set]
 
@@ -1798,7 +1798,7 @@ def destroy_shaw_related(
     scores: List[Tuple[float, int]] = []
     for j in pool:
         if int(j) == seed:
-            continue  # [text_corrupted] seed [text_corrupted]
+            continue  # TODO seed [text_corrupted]
         s = _relatedness(
             seed,
             j,
@@ -1851,7 +1851,7 @@ def destroy_ws_critical_window(
     evaluator: RobustEvaluator,
     rng: random.Random,
     min_k: int = 2,
-    max_k: int = 5,  # [text_corrupted] 5
+    max_k: int = 5,  # TODO 5
 ) -> Tuple[List[int], Set[int], Dict[int, List[int]]]:
     """
     WS-focused destroy[text_corrupted]
@@ -1877,7 +1877,7 @@ def destroy_ws_critical_window(
     _, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
     q = diag.get("q", {}) if isinstance(diag, dict) else {}
 
-    # [text_corrupted]present [text_corrupted] dummy / [text_corrupted]pi [text_corrupted]
+    # TODOpresent [text_corrupted] dummy / [text_corrupted]pi [text_corrupted]
     q_present = {int(j): float(v) for j, v in (q or {}).items() if int(j) in present}
     if q_present:
         j_star = int(max(q_present.keys(), key=lambda jj: q_present[jj]))
@@ -1892,7 +1892,7 @@ def destroy_ws_critical_window(
 
     L = len(ws_seq)
     if L <= min_k:
-        removed_order = ws_seq[:]  # [text_corrupted]
+        removed_order = ws_seq[:]  # TODO
     else:
         max_k_eff = min(int(max_k), L)
         k = int(rng.randint(int(min_k), int(max_k_eff)))
@@ -2158,12 +2158,12 @@ def repair_greedy_insert_with_place(
     max_agv_candidates: Optional[int] = None,
     max_pos_per_route: Optional[int] = None,
 
-    # [text_corrupted]
+    # TODO
     max_evals_per_task: Optional[int] = None,
     max_evals_total: Optional[int] = None,
     copy_inputs: bool = True,
 
-    # [text_corrupted]cheap [text_corrupted]
+    # TODOcheap [text_corrupted]
     preselect_m: int = 12,
     preselect_per_pos_shelves: int = 2,
 
@@ -2192,7 +2192,7 @@ def repair_greedy_insert_with_place(
     ws_pos = _ws_index(ws_fixed)
     pi = getattr(evaluator, "pi", {}) or {}
 
-    # [text_corrupted]shelf_seq [text_corrupted]v [text_corrupted]
+    # TODOshelf_seq [text_corrupted]v [text_corrupted]
     chain_of = _build_chain_of_map(shelf_seq, task_shelf_mapping)
     shelf_idx = _shelf_index(shelf_seq)
 
@@ -2204,7 +2204,7 @@ def repair_greedy_insert_with_place(
     # 1) [text_corrupted] removed_list
     # --------------------------
     if removed_order is not None:
-        # [text_corrupted] & [text_corrupted]removed_set [text_corrupted]
+        # TODO & [text_corrupted]removed_set [text_corrupted]
         base_set = removed_set if removed_set else set(int(x) for x in removed_order)
         seen = set()
         ordered = []
@@ -2214,7 +2214,7 @@ def repair_greedy_insert_with_place(
                 ordered.append(xx)
                 seen.add(xx)
 
-        # [text_corrupted] removed_set [text_corrupted]ws [text_corrupted]
+        # TODO removed_set [text_corrupted]ws [text_corrupted]
         rest = [int(x) for x in base_set if int(x) not in seen]
         rng.shuffle(rest)
         rest.sort(key=lambda j: (_ws_rank(j), rng.random()))
@@ -2248,7 +2248,7 @@ def repair_greedy_insert_with_place(
         present_tasks.update(int(x) for x in (seq or []))
     remaining_unfixed: Set[int] = (all_tasks - present_tasks) | set(int(x) for x in removed_list)
 
-    # [text_corrupted]
+    # TODO
     d_s_s = getattr(evaluator, "d_s_s", {}) or {}
     d_s_pi = getattr(evaluator, "d_s_pi", {}) or {}
     d_pi_s = getattr(evaluator, "d_pi_s", {}) or {}
@@ -2394,7 +2394,7 @@ def repair_greedy_insert_with_place(
         j = int(j)
         eval_used_task = 0
 
-        # [text_corrupted] j [text_corrupted] tail [text_corrupted]
+        # TODO j [text_corrupted] tail [text_corrupted]
         used_tail = pre.build_used_tail_cells(place=place, ignore_tasks=remaining_unfixed)
 
         cand_shelves = _cand_end_shelves_for_task(
@@ -2444,7 +2444,7 @@ def repair_greedy_insert_with_place(
                 seq_ins = base_seq[:]
                 seq_ins.insert(pos, j)
 
-                # [text_corrupted]route [text_corrupted]WS[text_corrupted]+ shelf slot[text_corrupted]
+                # TODOroute [text_corrupted]WS[text_corrupted]+ shelf slot[text_corrupted]
                 seq_ins = _normalize_one_route_ws_and_shelf(
                     seq_ins,
                     evaluator=evaluator,
@@ -2457,7 +2457,7 @@ def repair_greedy_insert_with_place(
                     continue
                 seen_route_keys.add(key)
 
-                # [text_corrupted]end_s
+                # TODOend_s
                 ok_s: List[int] = []
                 for s in cand_shelves:
                     ss = int(s)
@@ -2469,7 +2469,7 @@ def repair_greedy_insert_with_place(
                         routes=routes,      # base routes[text_corrupted]j[text_corrupted]
                         place=place,
                         used_tail_cells=used_tail,
-                        strict_move1=False, # [text_corrupted]
+                        strict_move1=False, # TODO
                     )
                     if ok:
                         ok_s.append(ss)
@@ -2503,7 +2503,7 @@ def repair_greedy_insert_with_place(
                     place[int(j)] = int(ss)
                     remaining_unfixed.discard(int(j))
                     continue
-            # [text_corrupted]
+            # TODO
             r_fb = _least_loaded_agv(routes, R_ids)
             routes[int(r_fb)].append(j)
             routes[int(r_fb)] = _normalize_one_route_ws_and_shelf(
@@ -2516,7 +2516,7 @@ def repair_greedy_insert_with_place(
             remaining_unfixed.discard(int(j))
             continue
 
-        # [text_corrupted] cheap [text_corrupted]preselect_m [text_corrupted]
+        # TODO cheap [text_corrupted]preselect_m [text_corrupted]
         cheap_pool.sort(key=lambda x: x[0])
         cheap_pool = cheap_pool[: max(1, int(preselect_m))]
 
@@ -2586,7 +2586,7 @@ def repair_greedy_insert_with_place(
             routes[int(rr)] = list(seq_ins)
             place[j] = int(ss)
         else:
-            # [text_corrupted]infeas_key [text_corrupted]obj
+            # TODOinfeas_key [text_corrupted]obj
             scored_cands.sort(key=lambda x: (x[0], x[1]))
             if strict_construct:
                 _, _, rr, pp, ss, seq_ins = scored_cands[0]
@@ -2642,7 +2642,7 @@ def repair_greedy_insert_with_place_ordered(
         place=place,
         evaluator=evaluator,
         removed=removed_set,
-        removed_order=removed_order,  # [text_corrupted]
+        removed_order=removed_order,  # TODO
         rng=rng,
         S_near_by_j=S_near_by_j,
         task_shelf_mapping=task_shelf_mapping,
@@ -2755,7 +2755,7 @@ def local_place_tune_once(
     top_k_try: int = 4,
     global_try_tasks: int = 0,
 
-    # [text_corrupted]+ [text_corrupted]
+    # TODO+ [text_corrupted]
     max_evals: Optional[int] = 200,
     cap_total: int = 60,
 ) -> Tuple[Dict[int, int], bool]:
@@ -2794,7 +2794,7 @@ def local_place_tune_once(
         else:
             global_set = set(rng.sample(keys, min(int(global_try_tasks), len(keys))))
 
-    # [text_corrupted]
+    # TODO
     order: List[int] = []
     if global_set:
         if q_map:
@@ -2814,9 +2814,9 @@ def local_place_tune_once(
         if budget is not None and budget <= 0:
             break
 
-        # [text_corrupted]
+        # TODO
         if j in global_set:
-            # [text_corrupted] cap_total[text_corrupted]S[text_corrupted]
+            # TODO cap_total[text_corrupted]S[text_corrupted]
             cands_base = _cand_end_shelves_for_task(
                 int(j),
                 place=place,
@@ -2908,7 +2908,7 @@ def intensify_shelf_seq_promote_critical_ws_once(
     if not q_map:
         return shelf_seq, False, base_obj
 
-    # [text_corrupted]makespan [text_corrupted]
+    # TODOmakespan [text_corrupted]
     j_star = int(max(q_map.keys(), key=lambda jj: float(q_map[jj])))
     ws_star = evaluator.pi.get(j_star, None)
     if ws_star is None:
@@ -2923,13 +2923,13 @@ def intensify_shelf_seq_promote_critical_ws_once(
         if ws is None:
             return (2, 10**9, orig_pos)
         ws = int(ws)
-        # [text_corrupted]
+        # TODO
         pri = 0 if ws == ws_star else 1
-        # [text_corrupted]
+        # TODO
         ord_in_ws = ws_idx.get(ws, {}).get(j, 10**9)
         return (pri, int(ord_in_ws), orig_pos)
 
-    # [text_corrupted] A[text_corrupted]
+    # TODO A[text_corrupted]
     candA = _dc_shelf_seq(shelf_seq)
     for c, seq in candA.items():
         seq2 = list(seq)
@@ -2942,11 +2942,11 @@ def intensify_shelf_seq_promote_critical_ws_once(
     if objA < base_obj - 1e-9:
         return candA, True, objA
 
-    # [text_corrupted] B[text_corrupted]
+    # TODO B[text_corrupted]
     best_seq = shelf_seq
     best_obj = base_obj
 
-    # [text_corrupted]
+    # TODO
     shelves = []
     for c, seq in shelf_seq.items():
         seq2 = [int(x) for x in seq]
@@ -2964,13 +2964,13 @@ def intensify_shelf_seq_promote_critical_ws_once(
     for _ in range(max(1, int(max_trials))):
         c = int(rng.choice(shelves))
         seq = [int(x) for x in shelf_seq[int(c)]]
-        # [text_corrupted]
+        # TODO
         cand_pos = [i for i, j in enumerate(seq) if i > 0 and int(evaluator.pi.get(j, -1)) == ws_star]
         if not cand_pos:
             continue
         i = int(rng.choice(cand_pos))
         j = int(seq[i])
-        # [text_corrupted]0..i-1[text_corrupted]
+        # TODO0..i-1[text_corrupted]
         new_pos = int(rng.randrange(0, i))
         if new_pos == i:
             continue
@@ -3012,7 +3012,7 @@ def local_shelf_seq_relocate_once(
     """
     shelf_seq = _dc_shelf_seq(shelf_seq)
 
-    # [text_corrupted]routes [text_corrupted] normalize [text_corrupted]
+    # TODOroutes [text_corrupted] normalize [text_corrupted]
     routes_norm = _normalize_ws_blocks(routes, evaluator)
     base_obj, _ = evaluator.evaluate(routes_norm, shelf_seq, place)
     base_obj = float(base_obj)
@@ -3047,7 +3047,7 @@ def local_shelf_seq_relocate_once(
                 cand.pop(idx)
                 cand.insert(pos, j)
 
-                # [text_corrupted]shallow copy [text_corrupted]
+                # TODOshallow copy [text_corrupted]
                 cand_shelf_seq = dict(shelf_seq)
                 cand_shelf_seq[int(c)] = cand
 
@@ -3084,7 +3084,7 @@ def cross_vehicle_move_once(
     max_trials: int = 3,
     max_pos_samples: int = 8,
     max_s_samples: int = 5,
-    max_evals: int = 10,  # [text_corrupted] 8~12[text_corrupted]
+    max_evals: int = 10,  # TODO 8~12[text_corrupted]
 ) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
     """
     Funnel cross-vehicle:
@@ -3101,7 +3101,7 @@ def cross_vehicle_move_once(
     for r in R_ids:
         routes.setdefault(int(r), [])
 
-    # [text_corrupted]
+    # TODO
     routes = _normalize_ws_blocks(routes, evaluator)
     base_obj, _ = evaluator.evaluate(routes, shelf_seq, place)
     base_obj = float(base_obj)
@@ -3164,14 +3164,14 @@ def cross_vehicle_move_once(
         )
         if not cands:
             cands = [min(int(s) for s in evaluator.S)]
-        # [text_corrupted]
+        # TODO
         if len(cands) > int(max_s_samples):
             head = cands[: int(max_s_samples)]
             tail = cands[int(max_s_samples):]
             if tail:
                 head.append(int(rng.choice(tail)))
             cands = head
-        # [text_corrupted]
+        # TODO
         out, seen = [], set()
         for s in cands:
             s = int(s)
@@ -3180,7 +3180,7 @@ def cross_vehicle_move_once(
                 seen.add(s)
         return out
 
-    # [text_corrupted](lb, cand_routes, cand_place)
+    # TODO(lb, cand_routes, cand_place)
     cand_pool: List[Tuple[float, Dict[int, List[int]], Dict[int, int]]] = []
 
     # ========== 1) relocate [text_corrupted]==========
@@ -3228,7 +3228,7 @@ def cross_vehicle_move_once(
                 cand_place = _dc_place(place)
                 cand_place[j] = s
 
-                # [text_corrupted]LB >= base_obj => [text_corrupted]
+                # TODOLB >= base_obj => [text_corrupted]
                 lb = proxy.solution_lb(routes=cand_routes, place=cand_place, stop_at=base_obj if math.isfinite(base_obj) else None)
                 if math.isfinite(base_obj) and lb >= base_obj - 1e-9:
                     continue
@@ -3293,7 +3293,7 @@ def cross_vehicle_move_once(
 
     cand_pool.sort(key=lambda x: x[0])
 
-    # [text_corrupted]
+    # TODO
     eval_k = min(max(1, int(max_evals)), 12, len(cand_pool))
 
     for i in range(eval_k):
@@ -3350,7 +3350,7 @@ def cross_vehicle_block_move_once(
                 cand_routes[r_from] = rest_from
                 cand_routes[r_to] = cand_routes[r_to][:pos] + block + cand_routes[r_to][pos:]
 
-                # [text_corrupted]block [text_corrupted]
+                # TODOblock [text_corrupted]
                 for j in block:
                     cands = _cand_end_shelves_for_task(
                         int(j),
@@ -3783,7 +3783,7 @@ def intensify_critical_tail_once(
                 cand_routes[best_r] = [x for x in cand_routes[best_r] if int(x) != int(j)]
                 cand_routes[r_to].insert(pos, int(j))
 
-                # [text_corrupted]j [text_corrupted]
+                # TODOj [text_corrupted]
                 cands = _cand_end_shelves_for_task(
                     int(j),
                     place=cand_place,
@@ -3971,7 +3971,7 @@ def cross_vehicle_2opt_star_once(
     evaluator: RobustEvaluator,
     rng: random.Random,
     max_trials: int = 12,
-    allow_non_improving: bool = False,  # [text_corrupted]shake [text_corrupted]
+    allow_non_improving: bool = False,  # TODOshake [text_corrupted]
 ) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
     """
     [text_corrupted]2-opt*[text_corrupted]
@@ -4055,7 +4055,7 @@ class AdaptiveOpPool:
     def pick(self, rng: random.Random, candidates: List[str]) -> str:
         cand = [c for c in candidates if c in self.w]
         if not cand:
-            # [text_corrupted]
+            # TODO
             return str(rng.choice(self.names))
 
         total = 0.0
@@ -5570,7 +5570,7 @@ def alns_minimize(
     shelf_init: Optional[Dict[int, int]] = None,
     ws_order_idx: Optional[Dict[int, Dict[int, int]]] = None,
 
-    # [text_corrupted]destroy[text_corrupted]
+    # Adaptive destroy/repair configuration
     enable_robust_destroy: bool = True,
     adaptive_reaction: float = 0.20,
     adaptive_segment_len: int = 50,
@@ -5614,7 +5614,7 @@ def alns_minimize(
     milp_polish_lock_immediate: int = 1,
     milp_polish_on_turbo: int = 0,
 ):
-    assert S_near_by_j is not None, "[text_corrupted]S_near_by_j [text_corrupted]"
+    assert S_near_by_j is not None, "S_near_by_j must be provided"
     rng = random.Random(seed)
     verbose_eff = bool(verbose)
     task_shelf_mapping = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=verbose_eff)
@@ -5740,7 +5740,7 @@ def alns_minimize(
         return float(obj_v), dict(det_v) if isinstance(det_v, dict) else {}
 
     # =========================
-    # [text_corrupted]
+    # TODO
     # =========================
     n_tasks = len(list(evaluator.J))
     n_s = len(list(evaluator.S))
@@ -5953,7 +5953,7 @@ def alns_minimize(
         "robust_sensitive",
         "rand_big",
     ]
-    # [text_corrupted]
+    # TODO
     init_destroy_w = {
         "critical_single": 1.25,
         "critical_batch": 1.35 if large_scale_mode else 0.95,
@@ -5988,7 +5988,7 @@ def alns_minimize(
         w_max=adaptive_w_max,
     )
 
-    # [text_corrupted] destroy [text_corrupted] removed_order [text_corrupted]seed-first / gap-first[text_corrupted]
+    # TODO destroy [text_corrupted] removed_order [text_corrupted]seed-first / gap-first[text_corrupted]
     ordered_required = {"critical_batch", "dual_tail_critical", "ws_gap_bundle", "ws_idle_gap", "ws_critical", "robust_sensitive"}
 
     # reward [text_corrupted]ALNS[text_corrupted]
@@ -6008,7 +6008,7 @@ def alns_minimize(
     P_DESTROY_RELATED = 0.35
     P_DESTROY_CHAIN = 0.25
 
-    # [text_corrupted]
+    # TODO
     if very_large_mode:
         if long_run_mode:
             # Borrow the older "260222" aggressive idea for long runs on huge instances.
@@ -6038,7 +6038,7 @@ def alns_minimize(
         P_USE_INTRA_2OPT *= 0.60
         P_USE_INTRA_OROPT *= 0.60
 
-    # [text_corrupted]
+    # TODO
     if very_large_mode:
         STAG_WS = 44 if long_run_mode else 55
         STAG_LIMIT = 120
@@ -6052,7 +6052,7 @@ def alns_minimize(
     FEAS_ESCAPE_PROB = max(0.0, min(0.25, float(feasible_escape_prob)))
     FEAS_ESCAPE_RELAX = max(0.0, float(feasible_escape_relax))
 
-    # [text_corrupted]
+    # TODO
     REHEAT_SOFT = max(2.50, 0.45 * float(T))
     REHEAT_STRONG = max(6.00, 0.95 * float(T))
 
@@ -6060,7 +6060,7 @@ def alns_minimize(
     post_shake = 0
     stall = 0
 
-    # [text_corrupted] destroy [text_corrupted] gamma>0 [text_corrupted]
+    # TODO destroy [text_corrupted] gamma>0 [text_corrupted]
     def _robust_destroy_prob(stagnating: bool) -> float:
         if (not enable_robust_destroy) or (int(getattr(evaluator, "gamma", 0)) <= 0):
             return 0.0
@@ -6157,12 +6157,12 @@ def alns_minimize(
         improved_best_this_iter = False
         exact_evals_this_iter = 0
 
-        # [text_corrupted]stall [text_corrupted]post_shake [text_corrupted]
+        # TODOstall [text_corrupted]post_shake [text_corrupted]
         stagnating = (stall >= STAG_WS)
         post_mode = (post_shake > 0)
         strong_shake = (stall >= STAG_LIMIT)
 
-        # [text_corrupted] post_mode [text_corrupted]
+        # TODO post_mode [text_corrupted]
         if stagnating or post_mode:
             T = max(T, REHEAT_SOFT)
         if strong_shake:
@@ -6225,7 +6225,7 @@ def alns_minimize(
 
         force_all_shelves = bool(strong_shake)
 
-        # ===== [text_corrupted] stall [text_corrupted]post_mode [text_corrupted]=====
+        # ===== Tune repair budgets by search state (stall/post/fast-feasible) =====
         if strong_shake:
             if very_large_mode:
                 repair_evals_per_task = 10 if turbo_mode else 8
@@ -6511,7 +6511,7 @@ def alns_minimize(
                     max_k=5,
                 )
                 if not removed_order:
-                    # [text_corrupted]
+                    # TODO
                     lo, hi = _destroy_frac("small")
                     remove_frac = rng.uniform(lo, hi)
                     removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
@@ -6534,14 +6534,14 @@ def alns_minimize(
                 )
 
             else:
-                # [text_corrupted]name
+                # TODOname
                 lo, hi = _destroy_frac("small")
                 remove_frac = rng.uniform(lo, hi)
                 removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed)
 
             removed_set = set(int(x) for x in (removed_order or [])) if removed_order else set()
-            # [text_corrupted] repair
+            # TODO repair
             missing = _missing_tasks_in_routes(cur.routes, evaluator)
             if missing:
                 miss_list = sorted((int(x) for x in missing), key=_ws_rank_local)
@@ -6553,7 +6553,7 @@ def alns_minimize(
                         removed_order.append(int(x))
                         removed_set.add(int(x))
             if not removed_set:
-                # [text_corrupted]
+                # TODO
                 lo, hi = _destroy_frac("small")
                 remove_frac = rng.uniform(lo, hi)
                 removed_set, routes_half = destroy_random(cur.routes, remove_frac, rng)
@@ -6730,7 +6730,7 @@ def alns_minimize(
 
             return routes_new_, place_new_, dname, rname
 
-        # ========== [text_corrupted] destroy+repair ==========
+        # ========== Core adaptive destroy + repair step ==========
         evaluator.set_tag("destroy_repair")
         routes_new, place_new, chosen_destroy, chosen_repair = _adaptive_destroy_repair()
 
@@ -6742,20 +6742,20 @@ def alns_minimize(
 
         # =====================================================
         # =====================================================
-        #  Gate[text_corrupted]heavy local search
+        # Gate for triggering heavy local search
         # =====================================================
         # =====================================================
-        #  Gate[text_corrupted]heavy local search
+        # Gate for triggering heavy local search
         # =====================================================
         # =====================================================
-        #  Gate[text_corrupted] details[text_corrupted]heavy local search
+        # Heavy-local gate details and candidate filtering
         # =====================================================
         routes_new = _normalize_ws_blocks(routes_new, evaluator)
 
-        # [text_corrupted]heavy local[text_corrupted] destroy+repair [text_corrupted]SA
+        # TODOheavy local[text_corrupted] destroy+repair [text_corrupted]SA
         shelf_seq_new = cur.shelf_seq
 
-        # [text_corrupted]v([text_corrupted]routes[text_corrupted]) [text_corrupted]shelf_seq [text_corrupted] routes[text_corrupted]ws_fixed_seq
+        # TODOv([text_corrupted]routes[text_corrupted]) [text_corrupted]shelf_seq [text_corrupted] routes[text_corrupted]ws_fixed_seq
         routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
 
         evaluator.set_tag("gate_eval")
@@ -6770,7 +6770,7 @@ def alns_minimize(
             p_min = 0.10 if turbo_mode else 0.08
         else:
             p_min = 0.25 if turbo_mode else 0.22
-        gate_delta = -math.log(p_min) * float(T)  # [text_corrupted]3*T
+        gate_delta = -math.log(p_min) * float(T)  # TODO3*T
 
         # if current state is infeasible, force heavy local to prioritize repairs
         infeasible_cur = (cur_key != (0, 0, 0))
@@ -6927,7 +6927,7 @@ def alns_minimize(
                     task_shelf_mapping=task_shelf_mapping,
                     shelf_init_override=shelf_init,
                     rng=rng,
-                    try_swap=bool(stagnating or strong_shake),  # [text_corrupted]/[text_corrupted] swap
+                    try_swap=bool(stagnating or strong_shake),  # TODO/[text_corrupted] swap
                     max_trials=cv_trials,
                     max_pos_samples=cv_pos_samples,
                     max_s_samples=cv_s_samples,
@@ -7110,7 +7110,7 @@ def alns_minimize(
                         cap_total=tune_cap,
                     )
 
-            # [text_corrupted] shelf_seq [text_corrupted]shelf_tune [text_corrupted]
+            # TODO shelf_seq [text_corrupted]shelf_tune [text_corrupted]
             shelf_seq_new = cur.shelf_seq
 
             if shelf_tune_on_iter:
@@ -7203,8 +7203,8 @@ def alns_minimize(
             #         routes_new = routes_rl
             #         cand_obj = float(obj_rl)
 
-        # [text_corrupted]do_heavy_local=False[text_corrupted]
-        # [text_corrupted]routes_new/ place_new [text_corrupted] destroy+repair[text_corrupted]shelf_seq_new=cur.shelf_seq[text_corrupted]
+        # TODOdo_heavy_local=False[text_corrupted]
+        # TODOroutes_new/ place_new [text_corrupted] destroy+repair[text_corrupted]shelf_seq_new=cur.shelf_seq[text_corrupted]
         # cand_obj [text_corrupted]cand_obj_fast[text_corrupted]SA accept[text_corrupted]
 
         # =====================================================
@@ -7254,10 +7254,10 @@ def alns_minimize(
             if obj_rl < float(cand_obj) - 1e-9:
                 routes_new = routes_rl
 
-                # [text_corrupted]relabel [text_corrupted] v [text_corrupted]shelf_seq [text_corrupted]
+                # TODOrelabel [text_corrupted] v [text_corrupted]shelf_seq [text_corrupted]
                 routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
 
-                # [text_corrupted]relabel [text_corrupted] routes[text_corrupted]details[text_corrupted]SA [text_corrupted] cand_key[text_corrupted]
+                # TODOrelabel [text_corrupted] routes[text_corrupted]details[text_corrupted]SA [text_corrupted] cand_key[text_corrupted]
                 evaluator.set_tag("relabel_eval")
                 cand_obj, cand_details = _cache_eval("fast", evaluator, routes_new, shelf_seq_new, place_new)
                 cand_obj = float(cand_obj)
@@ -7272,7 +7272,7 @@ def alns_minimize(
         # =====================================================
         # -------------- 5) SA accept (feasibility-first) -----
         # =====================================================
-        # [text_corrupted] cur/best[text_corrupted]reward [text_corrupted]accept [text_corrupted]cur [text_corrupted]
+        # TODO cur/best[text_corrupted]reward [text_corrupted]accept [text_corrupted]cur [text_corrupted]
         prev_cur_obj = float(cur_obj)
         prev_cur_key = tuple(cur_key)
         prev_best_obj = float(best_obj)
@@ -7349,7 +7349,7 @@ def alns_minimize(
                 else:
                     accept = False
         else:
-            # [text_corrupted]infeas-SA [text_corrupted]infeas
+            # TODOinfeas-SA [text_corrupted]infeas
             if cand_key < prev_cur_key:
                 accept = True
             elif cand_key == prev_cur_key:
@@ -7390,7 +7390,7 @@ def alns_minimize(
             cur_details = dict(cand_details) if isinstance(cand_details, dict) else {}
             cur_key = tuple(cand_key)
 
-            # best [text_corrupted]prev_best[text_corrupted]
+            # Update global best against previous best
             if (cand_key < prev_best_key) or (cand_key == prev_best_key and cand_obj < prev_best_obj - 1e-9):
                 best = _clone_sol(cur)
                 best_obj = float(cand_obj)
@@ -7411,7 +7411,7 @@ def alns_minimize(
         # =====================================================
         # -------------- 5.5) Adaptive weight update ----------
         # =====================================================
-        # [text_corrupted] ALNS[text_corrupted]reward [text_corrupted]cand [text_corrupted] prev_cur / prev_best
+        # TODO ALNS[text_corrupted]reward [text_corrupted]cand [text_corrupted] prev_cur / prev_best
         if accept:
             is_new_best = (cand_key < prev_best_key) or (cand_key == prev_best_key and cand_obj < prev_best_obj - 1e-9)
             is_improve_cur = (cand_key < prev_cur_key) or (cand_key == prev_cur_key and cand_obj < prev_cur_obj - 1e-9)
@@ -7659,7 +7659,7 @@ def alns_minimize(
             f"exact_hit={cache_hits_exact} exact_miss={cache_miss_exact} "
             f"fast_size={len(cache_fast)} exact_size={len(cache_exact)}"
         )
-    # [text_corrupted] routes [text_corrupted]shelf_seq [text_corrupted] ws_fixed_seq[text_corrupted]    final_sol.routes = _normalize_ws_blocks(final_sol.routes, evaluator)
+    # TODO routes [text_corrupted]shelf_seq [text_corrupted] ws_fixed_seq[text_corrupted]    final_sol.routes = _normalize_ws_blocks(final_sol.routes, evaluator)
     final_sol.routes = normalize_routes_by_shelf_seq_order(final_sol.routes, final_sol.shelf_seq, task_shelf_mapping)
     if bool(verbose_eff):
         _ = basic_feasibility_check_level0(
