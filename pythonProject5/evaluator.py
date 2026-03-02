@@ -104,6 +104,7 @@ class RobustEvaluator:
         chain_repair_max_iters: int = 30,
         chain_repair_verbose: bool = False,
         # --- speed / fitness options ---
+        mode: str = "exact",                        # "exact" | "fast"
         timeline_mode: str = "full",                 # "full" | "min" | "off"
         record_cell_repair_log: bool = True,
         collect_v_arcs: bool = True,
@@ -114,6 +115,7 @@ class RobustEvaluator:
         missing_task_weight: float = 1e6,
         cell_gate_mode: str = "legacy",
         cell_sigma: Optional[Dict[int, List[int]]] = None,
+        auto_cell_sigma: bool = True,
         # ===== compat: init-lock args may still be passed by main.py =====
         # 当前 evaluator 版本不使用 init-lock，但为了不改 main.py，这里接住参数避免 TypeError
 
@@ -200,6 +202,21 @@ class RobustEvaluator:
         # route-1 envelope switch
         self.envelope_shared_resources = bool(envelope_shared_resources)
 
+        self.mode = str(mode or "exact").lower().strip()
+        if self.mode not in ("exact", "fast"):
+            self.mode = "exact"
+        if self.mode == "fast":
+            # Fast mode: favor throughput during ALNS inner-loop screening.
+            enable_cell_repair = False
+            cell_repair_max_iters = 0
+            enable_chain_repair = False
+            chain_repair_max_iters = 0
+            timeline_mode = "off"
+            record_cell_repair_log = False
+            collect_v_arcs = False
+            cell_conflict_mode = "penalty"
+            allow_incomplete = True
+
         # cell repair
         self.enable_cell_repair = bool(enable_cell_repair)
         self.cell_repair_max_iters = max(0, int(cell_repair_max_iters))
@@ -230,6 +247,7 @@ class RobustEvaluator:
             self.cell_sigma = None
         else:
             self.cell_sigma = {int(s): [int(x) for x in (seq or [])] for s, seq in cell_sigma.items()}
+        self.auto_cell_sigma = bool(auto_cell_sigma)
 
         self._last_details: Optional[Dict[str, Any]] = None
         # ===== compat stash (ignored in this evaluator version) =====
@@ -1337,10 +1355,60 @@ class RobustEvaluator:
         # avoid recursive wake loops
         _wake_guard: Set[int] = set()
 
+        # runtime sigma:
+        #   1) explicit self.cell_sigma
+        #   2) auto-derived from current (shelf_seq + place), with tail tasks ordered after non-tail
+        runtime_cell_sigma: Optional[Dict[int, List[int]]] = None
+        if isinstance(getattr(self, "cell_sigma", None), dict):
+            runtime_cell_sigma = {
+                int(s): [int(x) for x in (seq or [])]
+                for s, seq in (getattr(self, "cell_sigma") or {}).items()
+            }
+        elif (cell_gate_mode == "event") and bool(getattr(self, "auto_cell_sigma", True)):
+            ws_rank: Dict[int, int] = {}
+            for _ws, seq_ws in (self.ws_fixed_seq or {}).items():
+                for idx, j_raw in enumerate(seq_ws or []):
+                    jj = int(j_raw)
+                    if (jj in self.J) and (jj not in ws_rank):
+                        ws_rank[jj] = int(idx)
+
+            chain_of_task: Dict[int, int] = {}
+            chain_pos: Dict[int, int] = {}
+            chain_len: Dict[int, int] = {}
+            for c_raw, seq_c in (shelf_seq or {}).items():
+                cc = int(c_raw)
+                seq_clean = [int(jj) for jj in (seq_c or []) if int(jj) in self.J]
+                ln = len(seq_clean)
+                for pos, jj in enumerate(seq_clean):
+                    chain_of_task[int(jj)] = int(cc)
+                    chain_pos[int(jj)] = int(pos)
+                    chain_len[int(jj)] = int(ln)
+
+            bucket: Dict[int, List[Tuple[int, int, int, int, int]]] = defaultdict(list)
+            for j_raw, s_raw in (place or {}).items():
+                try:
+                    jj = int(j_raw)
+                    ss = int(s_raw)
+                except Exception:
+                    continue
+                if (jj not in self.J) or (ss not in self.S):
+                    continue
+                pos = int(chain_pos.get(jj, 10**9))
+                ln = int(chain_len.get(jj, 0))
+                is_tail = 1 if (ln > 0 and pos == (ln - 1)) else 0
+                rank = int(ws_rank.get(jj, 10**9 + jj))
+                cc = int(chain_of_task.get(jj, 10**9))
+                bucket[int(ss)].append((is_tail, rank, cc, pos, jj))
+
+            runtime_cell_sigma = {}
+            for ss, rows in bucket.items():
+                rows.sort(key=lambda x: (int(x[0]), int(x[1]), int(x[2]), int(x[3]), int(x[4])))
+                runtime_cell_sigma[int(ss)] = [int(x[4]) for x in rows]
+
         # optional σ index: sigma_idx[cell][event_id] = order
         sigma_idx: Dict[int, Dict[int, int]] = {}
-        if isinstance(getattr(self, "cell_sigma", None), dict):
-            for s, seq in (getattr(self, "cell_sigma") or {}).items():
+        if isinstance(runtime_cell_sigma, dict):
+            for s, seq in (runtime_cell_sigma or {}).items():
                 ss = int(s)
                 sigma_idx[ss] = {int(tok): i for i, tok in enumerate(seq or [])}
         sigma_ptr: Dict[int, int] = defaultdict(int)  # 需要 from collections import defaultdict
@@ -1351,8 +1419,8 @@ class RobustEvaluator:
 
         def _sigma_next_expected(cell: int) -> Optional[int]:
             sigma = None
-            if isinstance(getattr(self, "cell_sigma", None), dict):
-                sigma = (self.cell_sigma or {}).get(int(cell))
+            if isinstance(runtime_cell_sigma, dict):
+                sigma = (runtime_cell_sigma or {}).get(int(cell))
             if not isinstance(sigma, list) or (not sigma):
                 return None
 
@@ -2220,8 +2288,8 @@ class RobustEvaluator:
                     return
 
                 sigma = None
-                if isinstance(getattr(self, "cell_sigma", None), dict):
-                    sigma = (self.cell_sigma or {}).get(int(cell))
+                if isinstance(runtime_cell_sigma, dict):
+                    sigma = (runtime_cell_sigma or {}).get(int(cell))
 
                 # ========== STRICT σ ==========
                 # 如果有 σ：只允许按 σ_ptr 指向的 expected 任务落位。
