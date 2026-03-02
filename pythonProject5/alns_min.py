@@ -5608,7 +5608,7 @@ def alns_minimize(
     ejection_chain_max_seg: int = 15,
     enable_ws_micro_reorder: int = 1,
     ws_micro_reorder_prob: float = 0.16,
-    slim_runtime_mode: int = 1,
+    slim_runtime_mode: int = 0,
     enable_milp_polish: int = 0,
     milp_polish_time_limit_sec: float = 30.0,
     milp_polish_lock_immediate: int = 1,
