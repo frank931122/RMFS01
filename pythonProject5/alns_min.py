@@ -3067,6 +3067,22 @@ def alns_minimize(
 
     # ✅ 新增：是否启用“鲁棒敏感 destroy”
     enable_robust_destroy: bool = True,
+
+    # ✅ 自适应参数外提（可配置/可复现）
+    adapt_reaction: float = 0.20,
+    adapt_segment_len: int = 50,
+    adapt_w_min: float = 0.05,
+    adapt_w_max: float = 50.0,
+
+    # ✅ reward 参数外提
+    score_best: float = 33.0,
+    score_improve: float = 9.0,
+    score_accept: float = 3.0,
+    score_reject: float = 0.0,
+
+    # ✅ 组合记分（pair credit）框架；默认关闭，不改变当前行为
+    pair_bias: float = 0.0,
+    pair_reaction: float = 0.20,
 ):
     assert S_near_by_j is not None, "需要提供 S_near_by_j 作为回库位候选集"
     rng = random.Random(seed)
@@ -3138,10 +3154,10 @@ def alns_minimize(
     destroy_pool = AdaptiveOpPool(
         destroy_names,
         init_destroy_w,
-        reaction=0.20,
-        segment_len=50,
-        w_min=0.05,
-        w_max=50.0,
+        reaction=float(adapt_reaction),
+        segment_len=int(adapt_segment_len),
+        w_min=float(adapt_w_min),
+        w_max=float(adapt_w_max),
     )
 
     # repair 算子池（至少两个，才算“有 repair 的自适应”）
@@ -3150,20 +3166,50 @@ def alns_minimize(
     repair_pool = AdaptiveOpPool(
         repair_names,
         init_repair_w,
-        reaction=0.20,
-        segment_len=50,
-        w_min=0.05,
-        w_max=50.0,
+        reaction=float(adapt_reaction),
+        segment_len=int(adapt_segment_len),
+        w_min=float(adapt_w_min),
+        w_max=float(adapt_w_max),
     )
 
     # 哪些 destroy 必须保留 removed_order 的语义（seed-first / gap-first）
     ordered_required = {"ws_gap_bundle", "ws_idle_gap", "ws_critical", "robust_sensitive"}
 
     # reward 设计（标准 ALNS）
-    SCORE_BEST = 33.0
-    SCORE_IMPROVE = 9.0
-    SCORE_ACCEPT = 3.0
-    SCORE_REJECT = 0.0
+    SCORE_BEST = float(score_best)
+    SCORE_IMPROVE = float(score_improve)
+    SCORE_ACCEPT = float(score_accept)
+    SCORE_REJECT = float(score_reject)
+
+    pair_score = defaultdict(float)
+    pair_cnt = defaultdict(int)
+
+    def _pair_update_if_needed(it_idx: int) -> None:
+        if float(pair_bias) <= 0.0:
+            return
+        if (int(it_idx) + 1) % int(adapt_segment_len) != 0:
+            return
+        rr = float(max(0.0, min(1.0, pair_reaction)))
+        if rr <= 0.0:
+            return
+
+        for (dn, rn), cnt in list(pair_cnt.items()):
+            if int(cnt) <= 0:
+                continue
+            avg = float(pair_score[(dn, rn)]) / float(cnt)
+
+            if dn in destroy_pool.w:
+                dw_old = float(destroy_pool.w[dn])
+                dw_new = (1.0 - rr) * dw_old + rr * avg
+                destroy_pool.w[dn] = max(float(adapt_w_min), min(float(adapt_w_max), float(dw_new)))
+
+            if rn in repair_pool.w:
+                rw_old = float(repair_pool.w[rn])
+                rw_new = (1.0 - rr) * rw_old + rr * avg
+                repair_pool.w[rn] = max(float(adapt_w_min), min(float(adapt_w_max), float(rw_new)))
+
+        pair_score.clear()
+        pair_cnt.clear()
 
     # destroy：正常阶段（你原来的）
     P_DESTROY_RANDOM_SMALL = 0.40
@@ -3777,7 +3823,13 @@ def alns_minimize(
         else:
             delta_inf = _infeas_scalar(cand_details, evaluator) - _infeas_scalar(cur_details, evaluator)
             T_inf = max(1.0, 2.0 * float(T))
-            prob = math.exp(-float(delta_inf) / max(1e-9, float(T_inf)))
+            x_inf = -float(delta_inf) / max(1e-9, float(T_inf))
+            if x_inf < -700.0:
+                prob = 0.0
+            elif x_inf > 700.0:
+                prob = 1.0
+            else:
+                prob = math.exp(x_inf)
             if rng.random() < prob:
                 accept = True
 
@@ -3820,8 +3872,14 @@ def alns_minimize(
         if chosen_repair is not None:
             repair_pool.record(chosen_repair, reward)
 
+        if (chosen_destroy is not None) and (chosen_repair is not None):
+            pair_key = (str(chosen_destroy), str(chosen_repair))
+            pair_score[pair_key] += float(reward)
+            pair_cnt[pair_key] += 1
+
         destroy_pool.maybe_update(it)
         repair_pool.maybe_update(it)
+        _pair_update_if_needed(it)
         # =====================================================
         # -------------- 6) cool & stall --------------
         # =====================================================
