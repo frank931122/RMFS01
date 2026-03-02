@@ -1,4 +1,4 @@
-﻿# main.py
+# main.py
 # main.py
 import os
 import argparse
@@ -36,8 +36,8 @@ from pathlib import Path
 
 class EvalProfiler:
     """
-    鍖呬竴灞?evaluator锛岀粺璁?evaluate() 琚皟鐢ㄦ鏁般€佹€昏€楁椂銆佸钩鍧囪€楁椂銆?
-    杩欐牱浣犺兘绔嬪埢鍒ゆ柇鐡堕鏄細evaluate 澶參 杩樻槸 璋冪敤娆℃暟鐖嗙偢銆?
+    包一层 evaluator，统计 evaluate() 被调用次数、总耗时、平均耗时。
+    这样你能立刻判断瓶颈是：evaluate 太慢 还是 调用次数爆炸。
     """
     def __init__(self, evaluator):
         self.evaluator = evaluator
@@ -53,105 +53,12 @@ class EvalProfiler:
         return obj, diag
 
     def __getattr__(self, name: str):
-        # 璁?alns_min 鍐呴儴鑻ヨ闂?evaluator.gamma / evaluator.J 绛夛紝涔熻兘閫忎紶
+        # 让 alns_min 内部若访问 evaluator.gamma / evaluator.J 等，也能透传
         return getattr(self.evaluator, name)
 
     def report(self, tag: str = "[Profiler]"):
         avg_ms = (self.total_sec / max(1, self.calls)) * 1000.0
         print(f"{tag} evaluate calls={self.calls} | total={self.total_sec:.3f}s | avg={avg_ms:.3f}ms")
-
-
-def clone_initial_solution(sol: InitialSolution) -> InitialSolution:
-    return InitialSolution(
-        routes={int(r): [int(x) for x in (seq or [])] for r, seq in (getattr(sol, "routes", {}) or {}).items()},
-        shelf_seq={int(c): [int(x) for x in (seq or [])] for c, seq in (getattr(sol, "shelf_seq", {}) or {}).items()},
-        place={int(j): int(s) for j, s in (getattr(sol, "place", {}) or {}).items()},
-    )
-
-
-def initial_solution_signature(sol: InitialSolution) -> tuple:
-    routes = getattr(sol, "routes", {}) or {}
-    shelf_seq = getattr(sol, "shelf_seq", {}) or {}
-    place = getattr(sol, "place", {}) or {}
-    key_routes = tuple(
-        (int(r), tuple(int(x) for x in (routes.get(r, []) or [])))
-        for r in sorted(routes.keys())
-    )
-    key_shelf = tuple(
-        (int(c), tuple(int(x) for x in (shelf_seq.get(c, []) or [])))
-        for c in sorted(shelf_seq.keys())
-    )
-    key_place = tuple((int(j), int(place[j])) for j in sorted(place.keys()))
-    return key_routes, key_shelf, key_place
-
-
-def bundle_to_initial_solution(bundle: dict) -> InitialSolution:
-    b = _bundle_intify(bundle)
-    return InitialSolution(
-        routes={int(r): [int(x) for x in (seq or [])] for r, seq in (b.get("routes", {}) or {}).items()},
-        shelf_seq={int(c): [int(x) for x in (seq or [])] for c, seq in (b.get("shelf_seq", {}) or {}).items()},
-        place={int(j): int(s) for j, s in (b.get("place", {}) or {}).items()},
-    )
-
-
-def build_fixed_shelf_seq_from_ws(
-    *,
-    task_shelf_mapping: Dict[int, object],
-    ws_fixed_seq: Dict[int, List[int]],
-    shelf_ids: List[int],
-    tasks: Set[int],
-) -> Dict[int, List[int]]:
-    """
-    Build a deterministic shelf order from:
-      - task->shelf mapping
-      - global ws fixed order
-    Missing tasks are appended by task id within their shelf chain.
-    """
-    out: Dict[int, List[int]] = {int(c): [] for c in shelf_ids}
-    seen: Set[int] = set()
-    task_set = set(int(j) for j in tasks)
-
-    def _safe_chain(j: int) -> Optional[int]:
-        v = task_shelf_mapping.get(int(j), None)
-        try:
-            if v is None:
-                return None
-            return int(v)
-        except Exception:
-            return None
-
-    for ws in sorted(int(w) for w in ws_fixed_seq.keys()):
-        for j_raw in (ws_fixed_seq.get(int(ws), []) or []):
-            j = int(j_raw)
-            if (j in seen) or (j not in task_set):
-                continue
-            c = _safe_chain(j)
-            if c is None:
-                continue
-            if int(c) not in out:
-                out[int(c)] = []
-            out[int(c)].append(int(j))
-            seen.add(int(j))
-
-    for j in sorted(task_set):
-        if j in seen:
-            continue
-        c = _safe_chain(j)
-        if c is None:
-            continue
-        if int(c) not in out:
-            out[int(c)] = []
-        out[int(c)].append(int(j))
-        seen.add(int(j))
-
-    return out
-
-
-def force_solution_shelf_seq(sol: InitialSolution, fixed_shelf_seq: Dict[int, List[int]]) -> InitialSolution:
-    sol.shelf_seq = {int(c): [int(x) for x in seq] for c, seq in (fixed_shelf_seq or {}).items()}
-    return sol
-
-
 def print_solution_full_from_diag(
     *,
     title: str,
@@ -163,8 +70,8 @@ def print_solution_full_from_diag(
     diag: dict,
 ) -> None:
     """
-    鎶?evaluator 鐨?diag锛堝寘鍚?timeline/pq/v_arcs 绛夛級鎸夆€滀汉鑳借鎳傗€濈殑褰㈠紡鎵撳嵃鍑烘潵銆?
-    鐢ㄤ簬锛氬悓涓€濂楄В鍦?eval_gamma=0 鍜?eval_gamma=1 涓嬬殑瀵圭収杈撳嚭銆?
+    把 evaluator 的 diag（包含 timeline/pq/v_arcs 等）按“人能读懂”的形式打印出来。
+    用于：同一套解在 eval_gamma=0 和 eval_gamma=1 下的对照输出。
     """
     def _to_float(v, default=float("nan")) -> float:
         try:
@@ -189,7 +96,7 @@ def print_solution_full_from_diag(
             return None
 
     print("\n" + "-" * 70)
-    print(f"[{title}] evaluator 纬={int(gamma_eval)} | makespan={float(makespan):.2f}")
+    print(f"[{title}] evaluator γ={int(gamma_eval)} | makespan={float(makespan):.2f}")
 
     # Routes
     print("\n  Routes:")
@@ -218,7 +125,7 @@ def print_solution_full_from_diag(
     q_raw = (diag.get("q", {}) or {}) if isinstance(diag, dict) else {}
     end_final = (diag.get("end_shelf_final", {}) or {}) if isinstance(diag, dict) else {}
 
-    # 鍏煎 key 鍙兘鏄?str
+    # 兼容 key 可能是 str
     def _get_map_val(m: dict, key_int: int):
         if key_int in m:
             return m[key_int]
@@ -243,7 +150,7 @@ def print_solution_full_from_diag(
     # V_arcs
     V_arcs = (diag.get("V_arcs", []) or []) if isinstance(diag, dict) else []
     if V_arcs:
-        print("\n  v[i,j,s,s鈥橾 = 1 (derived by evaluator):")
+        print("\n  v[i,j,s,s’] = 1 (derived by evaluator):")
         for arc in V_arcs:
             try:
                 i, j, s, sp = arc
@@ -280,7 +187,7 @@ def print_solution_full_from_diag(
                 f"arrCell_nom={_to_float(_get(rec,'arrive_cell_nom')):.2f} arrCell_act={_to_float(_get(rec,'arrive_cell_act')):.2f}"
             )
 
-            # 濡傛灉 evaluator 杈撳嚭閲屽寘鍚?layer 0 / layer G 鐨勫鐓у瓧娈碉紝灏遍澶栨墦鍗颁竴琛岋紙杩欏瀹氫綅浣犺鐨勨€溛?=1 鍏堣窇 纬=0 鍩哄噯鈥濋潪甯稿叧閿級
+            # 如果 evaluator 输出里包含 layer 0 / layer G 的对照字段，就额外打印一行（这对定位你说的“γ>=1 先跑 γ=0 基准”非常关键）
             has_layer = any(
                 _get(rec, k) is not None
                 for k in [
@@ -299,7 +206,7 @@ def print_solution_full_from_diag(
                     f"cell_act0={_to_float(_get(rec,'arrive_cell_act_0')):.2f} cell_actG={_to_float(_get(rec,'arrive_cell_act_G')):.2f}"
                 )
 
-            # LB 淇℃伅锛堝鏋滄湁锛?
+            # LB 信息（如果有）
             if _get(rec, "place_lb") is not None or _to_float(_get(rec, "place_wait_due_to_lb")) > 1e-9:
                 print(
                     "        [LB] "
@@ -317,11 +224,11 @@ def align_test_milp_vs_evaluator(
     milp_obj,
 ):
     """
-    鐩爣锛氶獙璇?evaluator(routes_by_agv, shelf_seq, place_from_x) 鏄惁绛変簬 MILP 鐨勭洰鏍囧€?
-    - routes_by_agv: {agv_id: [task,...], ...}锛堢敤 MILP 杈撳嚭閭ｅ锛?
-    - x_vars: Gurobi 鐨?x 鍙橀噺瀹瑰櫒锛堟敮鎸?x[j,s] 鎴?x[j][s]锛?
+    目标：验证 evaluator(routes_by_agv, shelf_seq, place_from_x) 是否等于 MILP 的目标值
+    - routes_by_agv: {agv_id: [task,...], ...}（用 MILP 输出那套）
+    - x_vars: Gurobi 的 x 变量容器（支持 x[j,s] 或 x[j][s]）
     """
-    # 1) 浠?MILP 鐨?x[j,s] 鎶藉彇 place锛歵ask -> end_shelf_cell
+    # 1) 从 MILP 的 x[j,s] 抽取 place：task -> end_shelf_cell
     place = {}
     J = [int(j) for j in evaluator.J]
     S = [int(s) for s in evaluator.S]
@@ -331,7 +238,7 @@ def align_test_milp_vs_evaluator(
         best_val = -1.0
         for s in S:
             v = None
-            # 鍏煎涓ょ绱㈠紩锛歺[j,s] 鎴?x[j][s]
+            # 兼容两种索引：x[j,s] 或 x[j][s]
             try:
                 v = x_vars[j, s]
             except Exception:
@@ -346,7 +253,7 @@ def align_test_milp_vs_evaluator(
             try:
                 val = float(v.X)  # Gurobi Var
             except Exception:
-                val = float(v)    # 浠ラ槻浣犲瓨鐨勬槸鏁板€?
+                val = float(v)    # 以防你存的是数值
 
             if val > best_val:
                 best_val = val
@@ -357,9 +264,9 @@ def align_test_milp_vs_evaluator(
 
     missing = [j for j in J if j not in place]
     if missing:
-        print(f"[ALIGN-TEST] WARN: 浠ヤ笅浠诲姟娌℃湁浠?x[j,s] 瑙ｆ瀽鍑哄洖搴撲綅: {missing}")
+        print(f"[ALIGN-TEST] WARN: 以下任务没有从 x[j,s] 解析出回库位: {missing}")
 
-    # 2) 鐢?evaluator 澶嶇畻 MILP 鐨?routes + place
+    # 2) 用 evaluator 复算 MILP 的 routes + place
     routes_chk = {int(r): [int(t) for t in seq] for r, seq in routes_by_agv.items()}
     obj_eval, diag = evaluator.evaluate(routes_chk, shelf_seq, place)
 
@@ -369,11 +276,11 @@ def align_test_milp_vs_evaluator(
 
     print(f"[ALIGN-TEST] MILP obj={milp_obj:.2f} | evaluator obj={obj_eval:.2f} | diff={diff:+.2f}")
 
-    # 3) 濡傛灉涓嶄竴鑷达紝缁欏嚭鏈€鏈夌敤鐨勪笅涓€姝ョ嚎绱細鎵撳嵃 p/q锛堝鏋?evaluator 鎻愪緵锛?
+    # 3) 如果不一致，给出最有用的下一步线索：打印 p/q（如果 evaluator 提供）
     if abs(diff) > 1e-6 and isinstance(diag, dict):
         p = diag.get("p", {}) or {}
         q = diag.get("q", {}) or {}
-        print("[ALIGN-TEST] evaluator 鐨?p/q锛堜究浜庡鐓?MILP 瀵煎嚭鐨?p_q_times CSV锛?")
+        print("[ALIGN-TEST] evaluator 的 p/q（便于对照 MILP 导出的 p_q_times CSV）:")
         for j in sorted(J):
             if j in p and j in q:
                 print(f"  Task {j}: p={float(p[j]):.2f}, q={float(q[j]):.2f}, end_s={place.get(j)}")
@@ -387,7 +294,7 @@ def compare_pq(
 ) -> None:
     """
     milp_pq / eval_pq: {task_id: (p, q)}
-    杈撳嚭 p/q 涓嶄竴鑷寸殑浠诲姟锛屾寜 |dq| 浠庡ぇ鍒板皬鎺掑簭锛屼究浜庡畾浣嶁€滃摢涓€姝ユ妸鏃堕棿鎺ㄨ繜浜嗏€濄€?
+    输出 p/q 不一致的任务，按 |dq| 从大到小排序，便于定位“哪一步把时间推迟了”。
     """
     keys = sorted(set(milp_pq.keys()) | set(eval_pq.keys()))
     rows = []
@@ -427,24 +334,24 @@ def compare_pick_start0_milp_vs_eval(
     topk: int = 30,
 ):
     """
-    鐢?MILP 鐨?layer=0 鐨?p 鍙嶆帹鍑?pick_start_0锛?
+    用 MILP 的 layer=0 的 p 反推出 pick_start_0：
         pick0_milp(j) = p_milp(j, layer=0) - d(home_before(j), j) - D_setup
-    鍐嶄笌 evaluator timeline 鐨?pick_start_0 瀵规瘮銆?
+    再与 evaluator timeline 的 pick_start_0 对比。
 
-    娉ㄦ剰锛氳繖閲?file_gamma 鐢ㄧ殑鏄€滃綋鍓嶈繖娆′紭鍖栫殑 gamma鈥濓紝浣嗚鍙栫殑鏄?layer_gamma=0銆?
+    注意：这里 file_gamma 用的是“当前这次优化的 gamma”，但读取的是 layer_gamma=0。
     """
 
     if shelf_data is None or d_s_pi is None:
         print("[PICK0-CHECK] missing shelf_data or d_s_pi; skip.")
         return
 
-    # 鉁?鍏抽敭淇锛氳 鈥滃綋鍓?gamma 鐨勬枃浠垛€濓紝浣嗙瓫 layer=0
+    # ✅ 关键修正：读 “当前 gamma 的文件”，但筛 layer=0
     milp_pq0 = load_milp_pq_from_csv(prefix=prefix, file_gamma=gamma, layer_gamma=0, outdir=outdir)
     if not milp_pq0:
         print("[PICK0-CHECK] missing MILP p/q for layer=0 in CSV.")
         return
 
-    # home_before锛氶摼棣栫敤 shelf_init锛涢摼鍐呯敤 place[prev]
+    # home_before：链首用 shelf_init；链内用 place[prev]
     J_set = set(int(x) for x in place.keys())
     home_before: dict[int, int] = {}
     for c, seq in shelf_seq.items():
@@ -462,7 +369,7 @@ def compare_pick_start0_milp_vs_eval(
         for a, b in zip(seq_clean[:-1], seq_clean[1:]):
             home_before[int(b)] = int(place.get(int(a), s_init))
 
-    # evaluator 鐨?pick_start_0 浠?timeline 鎷?
+    # evaluator 的 pick_start_0 从 timeline 拿
     timeline = evaluator_diag.get("timeline", []) or []
     pick0_eval: dict[int, float] = {}
     for rec in timeline:
@@ -520,11 +427,11 @@ def load_milp_pq_from_csv(
     outdir: str = "solution_exports"
 ) -> dict[int, tuple[float, float]]:
     """
-    璇诲彇浣犲鍑虹殑 p/q CSV锛屾瀯閫?{task_id: (p, q)}銆?
+    读取你导出的 p/q CSV，构造 {task_id: (p, q)}。
 
-    - file_gamma: 鐢ㄦ潵閫夋嫨鏂囦欢鍚嶅悗缂€锛屾瘮濡?*_gamma1.csv
-    - layer_gamma: 鑻ユ枃浠堕噷鏈?'gamma' 鍒楋紙allGamma 闀胯〃锛夛紝鍒欒繘涓€姝ョ瓫閫夋煇涓€灞?gamma锛堜緥濡?0/1/2锛?
-                  鑻ヤ负 None锛屽垯涓嶇瓫閫夛紙鐩存帴鏁磋〃璇伙級
+    - file_gamma: 用来选择文件名后缀，比如 *_gamma1.csv
+    - layer_gamma: 若文件里有 'gamma' 列（allGamma 长表），则进一步筛选某一层 gamma（例如 0/1/2）
+                  若为 None，则不筛选（直接整表读）
     """
     cand_paths = [
         os.path.join(outdir, f"{prefix}_p_q_times_allGamma_gamma{file_gamma}.csv"),
@@ -533,7 +440,7 @@ def load_milp_pq_from_csv(
     ]
     path = next((p for p in cand_paths if os.path.exists(p)), None)
     if path is None:
-        print(f"[ALIGN-DETAIL] WARN: cannot find MILP p/q CSV (tried: {cand_paths})")
+        print(f"[ALIGN-DETAIL] WARN: 找不到 MILP 的 p/q CSV（尝试过：{cand_paths}）")
         return {}
 
     df = pd.read_csv(path)
@@ -551,10 +458,10 @@ def load_milp_pq_from_csv(
     col_gamma = pick_col(["gamma", "eval_gamma", "g"])
 
     if col_task is None or col_p is None or col_q is None:
-        print(f"[ALIGN-DETAIL] WARN: p/q CSV 鍒楀悕涓嶅尮閰嶏細{list(df.columns)}")
+        print(f"[ALIGN-DETAIL] WARN: p/q CSV 列名不匹配：{list(df.columns)}")
         return {}
 
-    # 濡傛灉鏄?allGamma 鏂囦欢涓斾綘鎸囧畾 layer_gamma锛屽氨绛涢€夊眰
+    # 如果是 allGamma 文件且你指定 layer_gamma，就筛选层
     if (layer_gamma is not None) and (col_gamma is not None):
         try:
             df = df[df[col_gamma].astype(int) == int(layer_gamma)]
@@ -575,7 +482,7 @@ def load_milp_pq_from_csv(
 
 def align_test_from_bundle_json(
     prefix: str,
-    gamma: int,               # bundle 鏂囦欢鍚嶉噷鐨?source_gamma
+    gamma: int,               # bundle 文件名里的 source_gamma
     evaluator: RobustEvaluator,
     outdir: str = "solution_exports",
     shelf_data: dict[int, int] | None = None,
@@ -588,14 +495,14 @@ def align_test_from_bundle_json(
     return_diag: bool = False,
 ):
     """
-    璇诲彇 MILP bundle -> evaluator 澶嶇畻 -> 瀵归綈妫€鏌?
-    鏂板鑳藉姏锛?
-      - print_full=True锛氱敤鈥滃彲璇烩€濇柟寮忔墦鍗板畬鏁?timeline/pq 绛夛紙浣犺鐨勯偅绉嶏級
-      - return_diag=True锛氳繑鍥?(diff, eval_ms, milp_cmax, diag, routes, shelf_seq, place)锛屾柟渚垮悗缁仛 milp-eval-lock
+    读取 MILP bundle -> evaluator 复算 -> 对齐检查
+    新增能力：
+      - print_full=True：用“可读”方式打印完整 timeline/pq 等（你要的那种）
+      - return_diag=True：返回 (diff, eval_ms, milp_cmax, diag, routes, shelf_seq, place)，方便后续做 milp-eval-lock
     """
     path = os.path.join(outdir, f"{prefix}_bundle_gamma{gamma}.json")
     if not os.path.exists(path):
-        print(f"[ALIGN-TEST] cannot find bundle file: {path}")
+        print(f"[ALIGN-TEST] 找不到 bundle 文件：{path}")
         return None if return_diag else None
 
     with open(path, "r", encoding="utf-8") as f:
@@ -614,7 +521,7 @@ def align_test_from_bundle_json(
 
     print(f"[ALIGN-TEST] (bundle) MILP cmax={milp_cmax:.2f} | evaluator(gamma={eval_gamma})={obj_eval_f:.2f} | diff={diff:+.2f}")
 
-    # ====== 瀵煎嚭 evaluator 鐨勫叏閲忎腑闂撮噺 ======
+    # ====== 导出 evaluator 的全量中间量 ======
     if export_eval_diag and isinstance(diag, dict):
         try:
             export_evaluator_diagnostics(
@@ -633,7 +540,7 @@ def align_test_from_bundle_json(
         except Exception as e:
             print(f"[EXPORT-EVAL] failed: {type(e).__name__}: {e}")
 
-    # ====== 浣犺鐨勨€滃畬鏁村彲璇绘墦鍗扳€?======
+    # ====== 你要的“完整可读打印” ======
     if print_full and isinstance(diag, dict):
         title = print_tag or f"{export_tag} srcG{gamma} evalG{eval_gamma}"
         print_solution_full_from_diag(
@@ -646,7 +553,7 @@ def align_test_from_bundle_json(
             diag=diag,
         )
 
-    # ====== p/q 瀵归綈缁嗗寲 ======
+    # ====== p/q 对齐细化 ======
     milp_pq = load_milp_pq_from_csv(prefix=prefix, file_gamma=gamma, layer_gamma=eval_gamma, outdir=outdir)
 
     eval_pq: dict[int, tuple[float, float]] = {}
@@ -666,7 +573,7 @@ def align_test_from_bundle_json(
     if milp_pq and eval_pq:
         compare_pq(milp_pq=milp_pq, eval_pq=eval_pq, eps=1e-6, topk=30)
 
-    # ====== pick_start_0 瀵归綈璇婃柇 ======
+    # ====== pick_start_0 对齐诊断 ======
     if isinstance(diag, dict):
         sd = shelf_data if shelf_data is not None else getattr(evaluator, "shelf_data", None)
         dsp = d_s_pi if d_s_pi is not None else getattr(evaluator, "d_s_pi", None)
@@ -687,7 +594,7 @@ def align_test_from_bundle_json(
         except Exception as e:
             print(f"[PICK0-CHECK] skipped due to error: {type(e).__name__}: {e}")
 
-    # ====== 淇濈暀浣犲師鏉ョ殑璇婃柇淇℃伅 ======
+    # ====== 保留你原来的诊断信息 ======
     if isinstance(diag, dict):
         print("[ALIGN-TEST] feasible =", diag.get("feasible"))
         print("[ALIGN-TEST] penalties =", diag.get("penalties"))
@@ -705,7 +612,7 @@ def align_test_from_bundle_json(
             q2 = {int(k): float(v) for k, v in q_eval.items()}
             if q2:
                 j_star = max(q2, key=lambda jj: q2[jj])
-                print(f"[ALIGN-TEST] evaluator 鐨勭摱棰堜换鍔★細Task {int(j_star)}  q={float(q2[j_star]):.2f}")
+                print(f"[ALIGN-TEST] evaluator 的瓶颈任务：Task {int(j_star)}  q={float(q2[j_star]):.2f}")
         except Exception:
             pass
 
@@ -715,15 +622,15 @@ def align_test_from_bundle_json(
     return diff
 
 
-# ====== 鏋勯€犱紭鍖栭渶瑕佺殑鏁版嵁缁撴瀯 ======
+# ====== 构造优化需要的数据结构 ======
 def build_task_structures(tasks_df: pd.DataFrame,
                           agv_data: dict[int, int],
                           shelf_ids: list[int]):
     need = {"Task", "Shelf", "Workstation", "Duration"}
     if not need.issubset(tasks_df.columns):
-        raise ValueError(f"tasks_df 缂哄皯鍒楋細{need - set(tasks_df.columns)}")
+        raise ValueError(f"tasks_df 缺少列：{need - set(tasks_df.columns)}")
     if tasks_df.isna().any().any():
-        raise ValueError("tasks_df has NaN values; please clean inputs first.")
+        raise ValueError("tasks_df 存在 NaN，请先清洗。")
 
     tasks, task_shelf_mapping, J = {}, {}, set()
     shelf_usage = {sid: [] for sid in shelf_ids}
@@ -734,7 +641,7 @@ def build_task_structures(tasks_df: pd.DataFrame,
         J.add(tid)
         shelf_usage[sid].append(tid)
 
-    # 铏氭嫙浠诲姟
+    # 虚拟任务
     J0, Jd = {}, {}
     for aid in agv_data:
         J0[aid] = 1000 + int(aid)
@@ -744,7 +651,7 @@ def build_task_structures(tasks_df: pd.DataFrame,
         task_shelf_mapping[J0[aid]] = None
         task_shelf_mapping[Jd[aid]] = None
 
-    # 璐ф灦鍒濆铏氭嫙
+    # 货架初始虚拟
     J_I, shelf_virtual_tasks = {}, {}
     for sid in shelf_ids:
         vt = 3000 + int(sid)
@@ -768,7 +675,7 @@ def export_task_inputs_for_sim(prefix: str, tasks_df: pd.DataFrame,
     shelf_df = tasks_df[["Task", "Shelf"]].copy()
     info_df.to_csv(os.path.join(outdir, f"{prefix}_taskInfo.csv"), index=False)
     shelf_df.to_csv(os.path.join(outdir, f"{prefix}_taskShelf.csv"), index=False)
-    print(f"[EXPORT] 鍐欏嚭 solution_exports/{prefix}_taskInfo.csv, solution_exports/{prefix}_taskShelf.csv")
+    print(f"[EXPORT] 写出 solution_exports/{prefix}_taskInfo.csv, solution_exports/{prefix}_taskShelf.csv")
 
 
 def parse_gamma_list(s: str) -> list[int]:
@@ -872,16 +779,16 @@ def build_warm_hint_from_eval(
     warm_hint:
       - w, x, z, v, immediate
       - p/q start
-      - g/h start  (鍏抽敭锛歨 琛ㄧず鈥滆揣鏋跺湪璇?cell 涓婂仠鐣欑粨鏉熸椂闂粹€濓紝涓嶆槸鍒拌揪鏃堕棿)
+      - g/h start  (关键：h 表示“货架在该 cell 上停留结束时间”，不是到达时间)
 
     place_override:
-      - 鑻ユ彁渚涳紝鍒?x 鐩存帴鐢ㄨ繖涓紙纭繚鈥滈攣浣?MILP 鐨?x鈥濓級锛岃€屼笉鏄敤 evaluator 鐨?end_shelf_final锛堥伩鍏?evaluator repair 鏀瑰啓 x锛夈€?
+      - 若提供，则 x 直接用这个（确保“锁住 MILP 的 x”），而不是用 evaluator 的 end_shelf_final（避免 evaluator repair 改写 x）。
     """
     BIG_M_TIME = 10000.0
 
     warm_hint: dict = {}
 
-    # ---- w: 浠诲姟 -> AGV ----
+    # ---- w: 任务 -> AGV ----
     w_map: dict[int, int] = {}
     for r, seq in routes.items():
         rr = int(r)
@@ -891,7 +798,7 @@ def build_warm_hint_from_eval(
                 w_map[jj] = rr
     warm_hint["w"] = w_map
 
-    # ---- z: 瀹屾暣 j0 -> ... -> jd ----
+    # ---- z: 完整 j0 -> ... -> jd ----
     z_list: list[tuple[int, int, int]] = []
     for r, seq in routes.items():
         rr = int(r)
@@ -908,7 +815,7 @@ def build_warm_hint_from_eval(
             z_list.append((int(prev), int(jd), rr))
     warm_hint["z"] = z_list
 
-    # ---- v: evaluator 鎺ㄥ鐨?V_arcs ----
+    # ---- v: evaluator 推导的 V_arcs ----
     V_raw = details.get("V_arcs", []) or []
     v_list: list[tuple[int, int, int, int]] = []
     for arc in V_raw:
@@ -918,17 +825,17 @@ def build_warm_hint_from_eval(
         v_list.append((int(i), int(j), int(s), int(sp)))
     warm_hint["v"] = v_list
 
-    # ---- x: 浠诲姟鍥炲簱浣嶏紙EndShelf锛?----
+    # ---- x: 任务回库位（EndShelf） ----
     x_map: dict[int, int] = {}
 
     if place_override is not None:
-        # 鉁?寮哄埗浣跨敤 MILP 鐨?x锛堟垨浣犳兂閿佷綇鐨?place锛?
+        # ✅ 强制使用 MILP 的 x（或你想锁住的 place）
         for j, s in (place_override or {}).items():
             jj = int(j)
             if jj in J:
                 x_map[jj] = int(s)
     else:
-        # fallback锛氫娇鐢?evaluator 鐨?end_shelf_final
+        # fallback：使用 evaluator 的 end_shelf_final
         end_final = details.get("end_shelf_final", {}) or {}
         for j, s in end_final.items():
             jj = int(j)
@@ -954,13 +861,13 @@ def build_warm_hint_from_eval(
     if imm_edges:
         warm_hint["immediate"] = imm_edges
 
-    # ---- p/q: 鐩存帴鐢?evaluator 鐨?p/q ----
+    # ---- p/q: 直接用 evaluator 的 p/q ----
     p_map = {int(j): float(t) for j, t in (details.get("p", {}) or {}).items() if int(j) in J}
     q_map = {int(j): float(t) for j, t in (details.get("q", {}) or {}).items() if int(j) in J}
     warm_hint["p"] = p_map
     warm_hint["q"] = q_map
 
-    # ========== 鍏抽敭锛氭瀯閫?g/h ==========
+    # ========== 关键：构造 g/h ==========
     timeline = details.get("timeline", []) or []
     rec_by_task: dict[int, dict] = {}
     for rec in timeline:
@@ -1006,7 +913,7 @@ def build_warm_hint_from_eval(
         except Exception:
             return 0.0
 
-    # 閾惧唴鍚庣户銆佸熬浠诲姟
+    # 链内后继、尾任务
     succ_chain: dict[int, int] = {}
     chain_of: dict[int, int] = {}
     tail_of_chain: dict[int, int] = {}
@@ -1025,7 +932,7 @@ def build_warm_hint_from_eval(
     g_map: dict[tuple[int, int, int], float] = {}
     h_map: dict[tuple[int, int, int], float] = {}
 
-    # (1) 鐪熷疄浠诲姟锛歡=鍒拌揪 end cell 鐨勬椂闂达紱h=璇?cell 鍋滅暀缁撴潫锛堜笅涓€娆¤鍙栬蛋 / 鎴?BIG_M锛?
+    # (1) 真实任务：g=到达 end cell 的时间；h=该 cell 停留结束（下一次被取走 / 或 BIG_M）
     for j, s in x_map.items():
         jj = int(j)
         ss = int(s)
@@ -1048,7 +955,7 @@ def build_warm_hint_from_eval(
         g_map[(jj, 0, ss)] = float(g)
         h_map[(jj, 0, ss)] = float(h)
 
-    # (2) 铏氭嫙鍒濆浠诲姟 J_I锛歡=0锛沨=璇ラ摼棣栦换鍔＄殑 pick_start锛堣〃绀哄垵濮嬪崰鐢ㄧ粨鏉燂級
+    # (2) 虚拟初始任务 J_I：g=0；h=该链首任务的 pick_start（表示初始占用结束）
     for c, vt in (J_I or {}).items():
         cc = int(c)
         vt_id = int(vt)
@@ -1090,7 +997,7 @@ def build_warm_hint_from_eval(
 
 def _bundle_intify(bundle: dict) -> dict:
     """
-    鎶?bundle 鐨?routes/shelf_seq/place/cell_sigma 閲?key/value 缁熶竴杞?int
+    把 bundle 的 routes/shelf_seq/place/cell_sigma 里 key/value 统一转 int
     """
     routes_raw = bundle.get("routes") or bundle.get("routes_by_agv") or {}
     shelf_seq_raw = bundle.get("shelf_seq") or {}
@@ -1161,8 +1068,8 @@ def build_cell_sigma_from_event_run(
     J_set: Set[int],
 ) -> Dict[int, List[int]]:
     """
-    鐢?event gate 妯″紡璇勪及涓€娆★紝鎶藉彇姣忎釜 cell 鐨勨€滃疄闄呯珯浣嶉『搴?蟽[cell]=[task,...]鈥?
-    鎺掑簭瑙勫垯锛氭寜 arrive_cell_act锛堝疄闄呰惤浣嶅紑濮嬪崰鐢ㄦ椂鍒伙級鍗囧簭銆?
+    用 event gate 模式评估一次，抽取每个 cell 的“实际站位顺序 σ[cell]=[task,...]”
+    排序规则：按 arrive_cell_act（实际落位开始占用时刻）升序。
     """
     ev = evaluator_factory(int(eval_gamma), cell_sigma=None)
     ms, diag = ev.evaluate(routes, shelf_seq, place, verbose=False)
@@ -1212,13 +1119,13 @@ def run_cross_gamma_check(
     export_fail_diag: bool = True,
 ):
     """
-    瀵规瘡涓?source_gamma 鐨?bundle锛屽湪 eval_gammas 涓嬮兘璺戜竴閬?evaluator.evaluate(...)
-    瀵煎嚭锛?
-      - {prefix}_crossGamma_{tag}_suite.csv  (闀胯〃)
-      - {prefix}_crossGamma_{tag}_matrix.csv (鐭╅樀)
+    对每个 source_gamma 的 bundle，在 eval_gammas 下都跑一遍 evaluator.evaluate(...)
+    导出：
+      - {prefix}_crossGamma_{tag}_suite.csv  (长表)
+      - {prefix}_crossGamma_{tag}_matrix.csv (矩阵)
 
-    鏂板锛氬綋鏌愪釜 (src_g, eval_g) 璇勪及涓?inf 鎴?feasible=False 鏃讹紝鑷姩瀵煎嚭璇ユ evaluator diag锛?
-         鏂囦欢鍓嶇紑锛歿prefix}_crossFail_{tag}_srcG{src_g}_evalG{eval_g}_*
+    新增：当某个 (src_g, eval_g) 评估为 inf 或 feasible=False 时，自动导出该次 evaluator diag，
+         文件前缀：{prefix}_crossFail_{tag}_srcG{src_g}_evalG{eval_g}_*
     """
     os.makedirs(outdir, exist_ok=True)
 
@@ -1261,7 +1168,7 @@ def run_cross_gamma_check(
                 except Exception:
                     place_changed_cnt = None
 
-            # === 鏂板锛歩nf/涓嶅彲琛屾椂瀵煎嚭 diag锛堢敤浜庡畾浣嶁€滅垎鎺夊師鍥犫€濓級 ===
+            # === 新增：inf/不可行时导出 diag（用于定位“爆掉原因”） ===
             is_bad = (not math.isfinite(float(ms))) or (feasible is False)
             if export_fail_diag and is_bad and isinstance(diag, dict):
                 try:
@@ -1320,7 +1227,7 @@ def run_cross_gamma_check(
 # ============================================================
 
 _RE_EXACT = re.compile(
-    r"\[ALNS\]\s*Exact makespan:\s*base=([^\s]+)\s*(?:鈫抾->)\s*best=([^\s]+)",
+    r"\[ALNS\]\s*Exact makespan:\s*base=([^\s]+)\s*(?:→|->)\s*best=([^\s]+)",
     re.IGNORECASE
 )
 _RE_WARM = re.compile(
@@ -1472,7 +1379,7 @@ def run_quick_benchmark_subprocess(args) -> int:
             g = int(g)
             sd = int(sd)
 
-            # 鍏抽敭锛氶槻姝㈣鍒扳€滀笂涓€娆?run 鐨勬棫 bundle鈥?
+            # 关键：防止读到“上一次 run 的旧 bundle”
             bundle_path = _bench_bundle_path(root, str(args.prefix), g)
             try:
                 if bundle_path.exists():
@@ -1490,17 +1397,6 @@ def run_quick_benchmark_subprocess(args) -> int:
                 "--seed", str(sd),
                 "--alns-speed-profile", str(getattr(args, "alns_speed_profile", "balanced") or "balanced"),
                 "--alns-time-budget-sec", str(getattr(args, "alns_time_budget_sec", 0.0) or 0.0),
-                "--eval-layering", str(int(getattr(args, "eval_layering", 0) or 0)),
-                "--max-exact-evals-per-iter", str(int(getattr(args, "max_exact_evals_per_iter", 1) or 1)),
-                "--use-eval-cache", str(int(getattr(args, "use_eval_cache", 0) or 0)),
-                "--use-shallow-copy", str(int(getattr(args, "use_shallow_copy", 0) or 0)),
-                "--alns-history-seed", str(int(getattr(args, "alns_history_seed", 1) or 0)),
-                "--alns-multistart-restarts", str(int(getattr(args, "alns_multistart_restarts", 2) or 1)),
-                "--alns-enable-ejection-chain", str(int(getattr(args, "alns_enable_ejection_chain", 1) or 0)),
-                "--alns-ejection-prob", str(float(getattr(args, "alns_ejection_prob", 0.12) or 0.0)),
-                "--alns-enable-ws-micro-reorder", str(int(getattr(args, "alns_enable_ws_micro_reorder", 1) or 0)),
-                "--alns-ws-micro-prob", str(float(getattr(args, "alns_ws_micro_prob", 0.16) or 0.0)),
-                "--verbose", str(int(getattr(args, "verbose", 0) or 0)),
             ]
             if bool(getattr(args, "alns_ignore_cache", False)):
                 cmd.append("--alns-ignore-cache")
@@ -1529,18 +1425,18 @@ def run_quick_benchmark_subprocess(args) -> int:
                 out_text = f"[BENCH] EXCEPTION: {type(e).__name__}: {e}"
                 exit_code = 125
 
-            # 鍏堜粠 stdout 鎶?profiler / warm/exact锛堝彲閫夛級
+            # 先从 stdout 抓 profiler / warm/exact（可选）
             met = _extract_metrics_from_stdout(out_text)
             final_src = "stdout"
 
-            # 鉁?鏈€绋筹細浼樺厛浠?bundle JSON 璇?cmax
+            # ✅ 最稳：优先从 bundle JSON 读 cmax
             cmax_bundle = _bench_try_read_bundle_cmax(bundle_path)
             if cmax_bundle is not None:
                 met["final_ms"] = float(cmax_bundle)
                 met["feasible"] = bool(_bench_is_finite(met["final_ms"]))
                 final_src = "bundle"
 
-            # 瀛愯繘绋嬪け璐ワ細寮哄埗鍒ゅけ璐?
+            # 子进程失败：强制判失败
             if exit_code != 0:
                 met["feasible"] = False
                 met["final_ms"] = float("inf")
@@ -1548,7 +1444,7 @@ def run_quick_benchmark_subprocess(args) -> int:
 
             print(f"[BENCH] done  gamma={g} seed={sd} exit={exit_code} final_ms={met['final_ms']} src={final_src} wall={wall:.2f}s")
 
-            # 濡傛灉澶辫触锛岄『鎵嬭惤涓€涓棩蹇楋紝鏂逛究浣犲洖鐪嬫槸鍝潯绾︽潫鐖嗘帀浜?
+            # 如果失败，顺手落一个日志，方便你回看是哪条约束爆掉了
             if (not _bench_is_finite(met["final_ms"])) or exit_code != 0:
                 try:
                     log_path = root / f"bench_quick_{args.prefix}_g{g}_s{sd}.log"
@@ -1672,132 +1568,52 @@ def main():
         "--alns-speed-profile",
         choices=["balanced", "turbo"],
         default="turbo",
-        help="ALNS speed profile: balanced (quality) or turbo (speed).",
+        help="ALNS 搜索档位：balanced(质量优先) / turbo(速度优先，默认)",
     )
     ap.add_argument(
         "--alns-time-budget-sec",
         type=float,
         default=0.0,
-        help="ALNS time budget in seconds; 0 means no limit.",
-    )
-    ap.add_argument(
-        "--eval-layering",
-        type=int,
-        choices=[0, 1],
-        default=0,
-        help="ALNS dual-layer evaluation: 0=off, 1=fast prescreen + exact recheck.",
-    )
-    ap.add_argument(
-        "--max-exact-evals-per-iter",
-        type=int,
-        default=1,
-        help="Maximum exact evaluations per ALNS iteration when eval-layering=1.",
-    )
-    ap.add_argument(
-        "--use-eval-cache",
-        type=int,
-        choices=[0, 1],
-        default=0,
-        help="ALNS evaluation cache switch: 0=off, 1=on.",
-    )
-    ap.add_argument(
-        "--use-shallow-copy",
-        type=int,
-        choices=[0, 1],
-        default=0,
-        help="ALNS copy strategy: 0=deepcopy, 1=structured shallow copy.",
+        help="ALNS 软时间预算（秒）。<=0 表示不限制。",
     )
     ap.add_argument(
         "--alns-ignore-cache",
         action="store_true",
-        help="Ignore ALNS cache files (cold-start validation).",
+        help="忽略 turbo cache 文件（用于冷启动验证）。",
     )
     ap.add_argument(
         "--alns-no-seed",
         action="store_true",
-        help="strict no-seed mode: do not load historical feasible seeds (cache/bundle/prev).",
-    )
-    ap.add_argument(
-        "--alns-history-seed",
-        type=int,
-        choices=[0, 1],
-        default=1,
-        help="history seed switch: 0=off, 1=on (disabled when --alns-no-seed is set)",
-    )
-    ap.add_argument(
-        "--alns-multistart-restarts",
-        type=int,
-        default=2,
-        help="number of stage1 multi-start restarts (total iters are split across restarts)",
-    )
-    ap.add_argument(
-        "--alns-enable-ejection-chain",
-        type=int,
-        choices=[0, 1],
-        default=1,
-        help="enable cross-vehicle large-segment ejection-chain operator",
-    )
-    ap.add_argument(
-        "--alns-ejection-prob",
-        type=float,
-        default=0.12,
-        help="trigger probability of ejection-chain in heavy-local stage",
-    )
-    ap.add_argument(
-        "--alns-enable-ws-micro-reorder",
-        type=int,
-        choices=[0, 1],
-        default=1,
-        help="enable WS-neighborhood idle-window micro reorder operator",
-    )
-    ap.add_argument(
-        "--alns-ws-micro-prob",
-        type=float,
-        default=0.16,
-        help="trigger probability of WS micro-reorder in heavy-local stage",
-    )
-    ap.add_argument(
-        "--shelf-seq-intermediate",
-        action="store_true",
-        help="Experimental: treat shelf_seq as fixed intermediate state (not searched by ALNS).",
+        help="严格从头求解：不读取任何历史可行种子（cache/bridge）。",
     )
 
     ap.add_argument(
         "--cross-gamma-check",
         action="store_true",
-        help="Run cross-gamma evaluation matrix for each ALNS solution.",
-    )
-    ap.add_argument(
-        "--cross-gamma-independent",
-        type=int,
-        choices=[0, 1],
-        default=0,
-        help="Cross-gamma solve mode: 0=keep history-seed coupling (default), 1=independent per gamma.",
+        help="对每个 gamma 的 ALNS 解做 cross-gamma 评估矩阵：source_gamma 解放到 eval_gamma 下重新评估",
     )
     ap.add_argument(
         "--export-eval-diag",
         action="store_true",
-        help="瀵煎嚭 ALNS 瑙ｇ殑 evaluator diag/timeline/pq/robust_segments/v_arcs 鍒?solution_exports/",
+        help="导出 ALNS 解的 evaluator diag/timeline/pq/robust_segments/v_arcs 到 solution_exports/",
     )
     ap.add_argument(
         "--verbose",
-        type=int,
-        choices=[0, 1],
-        default=0,
-        help="Verbose logs: 0=off, 1=on.",
+        action="store_true",
+        help="打印更详细的 ALNS 解与 timeline（默认只打印摘要 + 进度）",
     )
     # ===== Quick benchmark (very small data, for automation) =====
     ap.add_argument(
         "--quick-bench",
         action="store_true",
-        help="Quick benchmark mode: run subprocess loops and export summary.",
+        help="快速基准测试：subprocess 反复运行 main.py，抓 makespan/Profiler，输出到项目根目录"
     )
-    ap.add_argument("--bench-iters", type=int, default=200, help="ALNS iterations per quick-bench subprocess.")
-    ap.add_argument("--bench-seeds", default="0,1,2", help="Comma-separated seeds for quick-bench.")
-    ap.add_argument("--bench-gammas", default="", help="Optional gamma list override for quick-bench.")
-    ap.add_argument("--bench-timeout", type=int, default=1800, help="Timeout (seconds) per quick-bench subprocess.")
-    ap.add_argument("--bench-compare", default="", help="Optional baseline summary JSON for PASS/FAIL comparison.")
-    ap.add_argument("--bench-tol", type=float, default=0.0, help="Relative tolerance for baseline comparison.")
+    ap.add_argument("--bench-iters", type=int, default=200, help="quick-bench 用的 ALNS 迭代次数")
+    ap.add_argument("--bench-seeds", default="0,1,2", help="quick-bench 用的 seeds，逗号分隔，例如 0,1,2")
+    ap.add_argument("--bench-gammas", default="", help="quick-bench 覆盖用的 gammas（可空，空则沿用 --gammas）")
+    ap.add_argument("--bench-timeout", type=int, default=1800, help="每次子进程运行的超时秒数")
+    ap.add_argument("--bench-compare", default="", help="可选：baseline summary.json 路径，用于 PASS/FAIL")
+    ap.add_argument("--bench-tol", type=float, default=0.0, help="baseline 容忍比例，比如 0.01 表示允许差 1%%")
     args = ap.parse_args()
 
     # --- quick benchmark mode: run and exit ---
@@ -1812,42 +1628,25 @@ def main():
 
     prefix = args.prefix
     gamma_list = parse_gamma_list(args.gammas)
-    cross_gamma_independent_mode = bool(
-        int(getattr(args, "cross_gamma_independent", 0) or 0) == 1
-        and bool(getattr(args, "cross_gamma_check", False))
-        and (len(gamma_list) > 1)
-    )
-    alns_iters_limit = max(1, int(getattr(args, "alns_iters", 0) or 1))
-    eval_layering_flag = int(getattr(args, "eval_layering", 0) or 0)
-    max_exact_evals_per_iter_flag = int(getattr(args, "max_exact_evals_per_iter", 1) or 1)
-    use_eval_cache_flag = int(getattr(args, "use_eval_cache", 0) or 0)
-    use_shallow_copy_flag = int(getattr(args, "use_shallow_copy", 0) or 0)
-    verbose_flag = bool(int(getattr(args, "verbose", 0) or 0) == 1)
-    enable_ejection_chain_flag = int(getattr(args, "alns_enable_ejection_chain", 1) or 0)
-    ejection_prob_flag = float(getattr(args, "alns_ejection_prob", 0.12) or 0.0)
-    enable_ws_micro_reorder_flag = int(getattr(args, "alns_enable_ws_micro_reorder", 1) or 0)
-    ws_micro_prob_flag = float(getattr(args, "alns_ws_micro_prob", 0.16) or 0.0)
-    history_seed_flag = int(getattr(args, "alns_history_seed", 1) or 0)
-    multistart_restarts_flag = max(1, int(getattr(args, "alns_multistart_restarts", 2) or 1))
 
-    # 鉁?鍙仛 ALNS锛氬彧闇€瑕佽繖涓€涓鍣?
+    # ✅ 只做 ALNS：只需要这一个容器
     alns_bundles_by_gamma: dict[int, dict] = {}
 
     scen_dir = os.path.join("scenario", prefix)
     tasks_csv = os.path.join(scen_dir, "tasks.csv")
     if not os.path.exists(tasks_csv):
-        raise FileNotFoundError(f"tasks.csv not found: {tasks_csv}")
+        raise FileNotFoundError(f"未找到 {tasks_csv}。")
 
 
 
-    # 鍦板浘
+    # 地图
     shelf_data, agv_data, ws_indices, sp_indices, W, H = load_map_csv(prefix)
 
-    # 浠诲姟
+    # 任务
     tasks_df = pd.read_csv(tasks_csv)
-    print(f"[TASK] 璇诲彇 tasks.csv 琛屾暟={len(tasks_df)}, WS闆嗗悎={sorted(tasks_df['Workstation'].unique())}")
+    print(f"[TASK] 读取 tasks.csv 行数={len(tasks_df)}, WS集合={sorted(tasks_df['Workstation'].unique())}")
     if len(tasks_df) != 11:
-        print(f"[WARN] tasks.csv has {len(tasks_df)} tasks (expected 11); continue solving.")
+        print(f"[WARN] 这次 tasks.csv 有 {len(tasks_df)} 个任务（你期望 11 个），继续求解…")
     if "WSOrder" not in tasks_df.columns:
         tasks_df["WSOrder"] = tasks_df.groupby("Workstation").cumcount() + 1
 
@@ -1857,7 +1656,7 @@ def main():
         .apply(lambda s: [int(x) for x in s.tolist()])
         .to_dict()
     )
-    print("[WSOrder] fixed order:", ws_fixed_seq)
+    print("[WSOrder] 固定顺序：", ws_fixed_seq)
 
     map_obj = create_map_from_components(
         width=W, height=H,
@@ -1893,7 +1692,7 @@ def main():
 
     export_task_inputs_for_sim(prefix, tasks_df)
 
-    # 瑙勫垯鍒濊В
+    # 规则初解
     pi = {j: tasks[j][0] for j in J}
     init_sol = build_initial_solution_basic(
         J=J, R=R,
@@ -1903,21 +1702,7 @@ def main():
         pi=pi
     )
 
-    # Experiment mode (opt-in): treat shelf_seq as an intermediate fixed variable.
-    shelf_seq_intermediate_mode = bool(getattr(args, "shelf_seq_intermediate", False))
-    fixed_shelf_seq: Dict[int, List[int]] = {}
-    if shelf_seq_intermediate_mode:
-        fixed_shelf_seq = build_fixed_shelf_seq_from_ws(
-            task_shelf_mapping=task_shelf_mapping,
-            ws_fixed_seq=ws_fixed_seq,
-            shelf_ids=shelf_ids,
-            tasks=J,
-        )
-        init_sol = force_solution_shelf_seq(init_sol, fixed_shelf_seq)
-    if shelf_seq_intermediate_mode:
-        print("[ALNS] shelf_seq-as-intermediate mode ON: fixed derived shelf order (ws + task->shelf).")
-
-    # 璺濈涓?螖锛堢粰璇勪及鍣級
+    # 距离与 Δ（给评估器）
     d_s_pi, d_pi_s, d_s_s = {}, {}, {}
     for s in S:
         for j in J:
@@ -1932,7 +1717,7 @@ def main():
     Delta_pi_s = {k: d_pi_s[k] for k in d_pi_s}
     Delta_s_s  = {k: d_s_s[k]  for k in d_s_s}
 
-    # 姣忎釜浠诲姟鐨勨€滃伐浣嶆渶杩戝墠 m 涓偍浣嶁€濓紙ALNS 鐢ㄥ畠鏉ユ灇涓?x锛?
+    # 每个任务的“工位最近前 m 个储位”（ALNS 用它来枚举 x）
     m = 8
     S_near_by_j = {j: sorted(S, key=lambda s: d_pi_s[(j, s)])[:min(m, len(S))] for j in J}
     chain_repair_iters_hard = max(24, min(160, 2 * len(J)))
@@ -1947,11 +1732,7 @@ def main():
 
     def evaluator_factory_for_cross(eval_gamma: int,
                                     cell_sigma: Optional[Dict[int, List[int]]] = None) -> RobustEvaluator:
-        # cross-gamma锛氳鈥滃彲姣斺€濓紝鎵€浠ョ敤 event gate + 鍙€?蟽 鏉ラ攣姝?cell 绔欎綅椤哄簭
-        sigma_eff: Optional[Dict[int, List[int]]] = None
-        if isinstance(cell_sigma, dict) and len(cell_sigma) > 0:
-            sigma_eff = {int(s): [int(x) for x in (seq or [])] for s, seq in cell_sigma.items()}
-        cross_cell_gate_mode = "event" if sigma_eff else "off"
+        # cross-gamma：要“可比”，所以用 event gate + 可选 σ 来锁死 cell 站位顺序
         return RobustEvaluator(
             J=J, R=R, S=S,
             pi=pi,
@@ -1976,9 +1757,9 @@ def main():
             cell_conflict_mode="hard",
             allow_incomplete=False,
 
-            # Keep event-gate only when a non-empty sigma is provided; fallback to exact mode otherwise.
-            cell_gate_mode=cross_cell_gate_mode,
-            cell_sigma=sigma_eff,
+            # ✅关键：event gate + σ
+            cell_gate_mode="event",
+            cell_sigma=cell_sigma,
 
             timeline_mode="off",
             collect_v_arcs=False,
@@ -1988,10 +1769,9 @@ def main():
             init_lock_max_iters=INIT_LOCK_ITERS_CROSS,
             init_lock_tol=INIT_LOCK_TOL,
             init_lock_verbose=False,
-            mode="exact",
         )
 
-    # 鎵撳嵃 ALNS 缁撴瀯瑙?
+    # 打印 ALNS 结构解
     def print_alns_solution(gamma_val: int, sol, evaluator: RobustEvaluator):
         ms, diag = evaluator.evaluate(sol.routes, sol.shelf_seq, sol.place)
         p = diag.get("p", {}); q = diag.get("q", {})
@@ -1999,7 +1779,7 @@ def main():
         V_arcs = diag.get("V_arcs", []); timeline = diag.get("timeline", [])
 
         print("\n----------------------------------------------------------------------")
-        print(f"[ALNS] solution summary (gamma={gamma_val})")
+        print(f"[ALNS] 结构解（γ={gamma_val}）")
         for r in sorted(sol.routes):
             print(f"  AGV {r} route: {sol.routes[r]}")
         print("\n  Shelf sequences:")
@@ -2015,12 +1795,12 @@ def main():
             print(f"    Task {j}: p[{p[j]:.2f}] | q[{q[j]:.2f}]  end_s={end_final.get(j, 'NA')}")
 
         if V_arcs:
-            print("\n  v[i,j,s,s'] = 1 锛堣瘎浼板櫒鎺ㄥ锛岀敤浜庤瘖鏂級")
+            print("\n  v[i,j,s,s'] = 1 （评估器推导，用于诊断）")
             for (i, jj, s, sp) in V_arcs:
                 print(f"    v[{i},{jj},{s},{sp}] = 1")
 
         if timeline:
-            print("\n  --- Timeline (璇﹀敖) ---")
+            print("\n  --- Timeline (详尽) ---")
             timeline_sorted = sorted(timeline, key=lambda rec: (rec["ws_start"], rec["Task"]))
             for rec in timeline_sorted:
                 print(
@@ -2035,33 +1815,28 @@ def main():
                 )
         print("----------------------------------------------------------------------\n")
 
-    # 閫?纬 姹傝В
-    # 閫?纬 姹傝В锛堝彧璺?ALNS锛?
+    # 逐 γ 求解
+    # 逐 γ 求解（只跑 ALNS）
     prev_best_sol: InitialSolution | None = None
     for g in gamma_list:
         print("\n" + "=" * 70)
-        print(f"[RUN] Start ALNS: gamma={g}")
+        print(f"[RUN] 开始 ALNS：γ = {g}")
         print("=" * 70)
 
-        need_full_diag = bool(args.export_eval_diag or verbose_flag)
+        need_full_diag = bool(args.export_eval_diag or args.verbose)
         requested_profile = str(getattr(args, "alns_speed_profile", "balanced") or "balanced").strip().lower()
         no_seed_cli = bool(getattr(args, "alns_no_seed", False))
-        no_seed = bool(no_seed_cli)
-        if no_seed:
-            print("[ALNS] strict no-seed mode: skip all historical seeds.")
-        else:
-            if cross_gamma_independent_mode:
-                print("[ALNS] cross-gamma independent mode: disable history-seed/prev-gamma coupling.")
-            else:
-                print("[ALNS] history-seed mode enabled: cache/prev-gamma/multi-start active.")
-        run_profile = "balanced" if no_seed else requested_profile
+        no_seed = True
+        if (not no_seed_cli):
+            print("[ALNS] history seed loading disabled globally: force no-seed recomputation mode.")
+        run_profile = requested_profile if requested_profile in {"balanced", "turbo"} else "balanced"
         fast_post_mode = (run_profile == "turbo")
-        if no_seed and requested_profile == "turbo":
-            print("[ALNS] no-seed mode: force balanced profile for from-scratch feasibility.")
+        if no_seed and (run_profile == "turbo"):
+            print("[ALNS] no-seed mode: turbo profile enabled (feasible seed + fast search).")
 
-        # ========= Fast evaluator锛堢粰 ALNS 鍐呭眰鐢級=========
-        # ========= Fast evaluator锛堢粰 ALNS 鍐呭眰鐢級=========
-        # ========= Fast evaluator锛堢粰 ALNS 鍐呭眰鐢級=========
+        # ========= Fast evaluator（给 ALNS 内层用）=========
+        # ========= Fast evaluator（给 ALNS 内层用）=========
+        # ========= Fast evaluator（给 ALNS 内层用）=========
         evaluator_fast = RobustEvaluator(
             J=J, R=R, S=S,
             pi=pi,
@@ -2077,7 +1852,7 @@ def main():
             detach_on_mismatch=False,
             envelope_shared_resources=True,
 
-            # --- turbo 涓嬪紑灏忔淇锛岄伩鍏嶄竴鐩村仠鐣欏湪鈥滀笉鍙鎯╃綒鍖衡€?---
+            # --- turbo 下开小步修复，避免一直停留在“不可行惩罚区” ---
             enable_chain_repair=bool(fast_post_mode),
             chain_repair_max_iters=(2 if fast_post_mode else 0),
             enable_cell_repair=bool(fast_post_mode),
@@ -2096,7 +1871,6 @@ def main():
             init_lock_max_iters=0,
             init_lock_tol=INIT_LOCK_TOL,
             init_lock_verbose=False,
-            mode="fast",
         )
 
         # ========= Hard-partial evaluator (for feasibility-driven construction) =========
@@ -2127,10 +1901,9 @@ def main():
             init_lock_max_iters=INIT_LOCK_ITERS_ALIGN,
             init_lock_tol=INIT_LOCK_TOL,
             init_lock_verbose=False,
-            mode="exact",
         )
 
-        # ========= Exact evaluator锛圓LNS 缁撴潫鍚庢牳楠?瀵煎嚭鐢級=========
+        # ========= Exact evaluator（ALNS 结束后核验/导出用）=========
         evaluator_exact = RobustEvaluator(
             J=J, R=R, S=S,
             pi=pi,
@@ -2146,7 +1919,7 @@ def main():
             detach_on_mismatch=False,
             envelope_shared_resources=True,
 
-            # --- Exact锛氬厑璁镐慨澶嶏紙瀵归綈 MILP / cross-gamma 鍙瘮锛?---
+            # --- Exact：允许修复（对齐 MILP / cross-gamma 可比） ---
             enable_chain_repair=True,
             chain_repair_max_iters=chain_repair_iters_hard,
             enable_cell_repair=True,
@@ -2163,58 +1936,15 @@ def main():
             init_lock_max_iters=INIT_LOCK_ITERS_ALIGN,
             init_lock_tol=INIT_LOCK_TOL,
             init_lock_verbose=False,
-            mode="exact",
         )
 
         shelf_init_for_alns = {int(c): int(pos) for c, pos in shelf_data.items()}
         cache_bundle_path = Path("solution_exports") / f"{prefix}_alns_bundle_cache_gamma{int(g)}.json"
-        use_history_seed = bool((not no_seed) and int(history_seed_flag) == 1 and (not cross_gamma_independent_mode))
-        allow_history_seed_io = bool(use_history_seed and (not bool(getattr(args, "alns_ignore_cache", False))))
+        allow_history_seed_io = False
+        # Keep the no_seed policy decided above (forced true for pure recomputation).
+        no_seed = bool(no_seed)
+        # Hard policy: do not read any historical feasible seed.
         feasible_seed: InitialSolution | None = None
-        if use_history_seed:
-            seed_candidates: list[tuple[str, InitialSolution]] = []
-            seen_seed_keys: set[tuple] = set()
-
-            def _try_add_seed(tag: str, sol_obj: InitialSolution | None) -> None:
-                if sol_obj is None:
-                    return
-                try:
-                    sig = initial_solution_signature(sol_obj)
-                except Exception:
-                    return
-                if sig in seen_seed_keys:
-                    return
-                seen_seed_keys.add(sig)
-                seed_candidates.append((str(tag), clone_initial_solution(sol_obj)))
-
-            if prev_best_sol is not None:
-                _try_add_seed("prev_gamma", prev_best_sol)
-
-            if allow_history_seed_io and cache_bundle_path.exists():
-                try:
-                    cache_bundle = load_bundle_json(str(cache_bundle_path))
-                    _try_add_seed("cache_gamma", bundle_to_initial_solution(cache_bundle))
-                except Exception as e:
-                    print(f"[ALNS] history cache load failed: {type(e).__name__}: {e}")
-
-            live_bundle_path = Path("solution_exports") / f"{prefix}_alns_bundle_gamma{int(g)}.json"
-            if (not bool(getattr(args, "alns_ignore_cache", False))) and live_bundle_path.exists():
-                try:
-                    live_bundle = load_bundle_json(str(live_bundle_path))
-                    _try_add_seed("bundle_gamma", bundle_to_initial_solution(live_bundle))
-                except Exception as e:
-                    print(f"[ALNS] history bundle load failed: {type(e).__name__}: {e}")
-
-            best_seed_ms = float("inf")
-            for seed_tag, seed_sol in seed_candidates:
-                ms_seed, _ = evaluator_exact.evaluate(seed_sol.routes, seed_sol.shelf_seq, seed_sol.place)
-                if math.isfinite(float(ms_seed)):
-                    print(f"[ALNS] history seed accepted ({seed_tag}) | cmax={float(ms_seed):.2f}")
-                    if float(ms_seed) < float(best_seed_ms):
-                        best_seed_ms = float(ms_seed)
-                        feasible_seed = clone_initial_solution(seed_sol)
-            if feasible_seed is None and seed_candidates:
-                print("[ALNS] history seeds found but none are exact-feasible; fallback to fresh init.")
 
         forced_seed: InitialSolution | None = None
         forced_seed_ms: float = float("inf")
@@ -2234,7 +1964,7 @@ def main():
             )
             if math.isfinite(float(forced_seed_ms)):
                 print(f"[ALNS] no-seed full-coverage seed ready | cmax={float(forced_seed_ms):.2f}")
-            if not math.isfinite(float(forced_seed_ms)):
+            if (not math.isfinite(float(forced_seed_ms))):
                 print("[ALNS] no-seed deterministic ws-round-robin exact seed.")
                 rr_seed = build_ws_round_robin_seed(
                     forced_seed,
@@ -2277,8 +2007,7 @@ def main():
                 forced_seed = alns_minimize(
                     init=forced_seed,
                     evaluator=prof_seed,
-                    evaluator_exact=evaluator_exact,
-                    iters=min(alns_iters_limit, (520 if int(g) == 0 else 260)),
+                    iters=(520 if int(g) == 0 else 260),
                     start_T=1.1,
                     cool=0.997,
                     S_near_by_j=S_near_by_j,
@@ -2295,17 +2024,8 @@ def main():
                     eval_budget_total=(22000 if int(g) == 0 else 9000),
                     eval_budget_heavy=(13000 if int(g) == 0 else 5000),
                     target_feasible_obj=1000.0,
-                    eval_layering=eval_layering_flag,
-                    max_exact_evals_per_iter=max_exact_evals_per_iter_flag,
-                    use_eval_cache=use_eval_cache_flag,
-                    use_shallow_copy=use_shallow_copy_flag,
-                    verbose=verbose_flag,
-                    enable_ejection_chain=enable_ejection_chain_flag,
-                    ejection_chain_prob=ejection_prob_flag,
-                    enable_ws_micro_reorder=enable_ws_micro_reorder_flag,
-                    ws_micro_reorder_prob=ws_micro_prob_flag,
                 )
-                prof_seed.report(tag=f"[SeedRepair gamma={g}]")
+                prof_seed.report(tag=f"[SeedRepair γ={g}]")
                 forced_seed_ms, _ = evaluator_exact.evaluate(
                     forced_seed.routes, forced_seed.shelf_seq, forced_seed.place
                 )
@@ -2314,13 +2034,19 @@ def main():
             if not math.isfinite(float(forced_seed_ms)):
                 print("[ALNS] warning: exact feasible seed not found yet; ALNS will continue from best-available structure.")
 
-        # ========= 璋冪敤 ALNS锛圥rofiler 鍖?fast evaluator锛?========
+        # ========= 调用 ALNS（Profiler 包 fast evaluator）=========
         total_budget = float(getattr(args, "alns_time_budget_sec", 0.0) or 0.0)
         if args.alns_iters and args.alns_iters > 0:
+            seed_exact_feasible = bool((forced_seed is not None) and math.isfinite(float(forced_seed_ms)))
             search_evaluator = evaluator_fast
-            if no_seed and int(g) == 0:
+            if no_seed and int(g) == 0 and (not seed_exact_feasible):
                 search_evaluator = evaluator_hard_partial
+            prof = EvalProfiler(search_evaluator)
             print(f"[ALNS] Start: iters={args.alns_iters}, gamma={g}")
+            if forced_seed is not None:
+                init_for_alns = forced_seed
+            else:
+                init_for_alns = init_sol
             if total_budget <= 0.0:
                 budget_stage1 = None
                 budget_stage2 = 0.0
@@ -2335,134 +2061,52 @@ def main():
             stage1_eval_budget_heavy = None
             stage1_target_obj = None
             if no_seed:
-                stage1_eval_budget_total = 42000
-                stage1_eval_budget_heavy = 25000
-                if alns_iters_limit >= 2000:
-                    # Long-run mode: scale eval budgets with requested iteration cap.
-                    stage1_eval_budget_total = max(stage1_eval_budget_total, 20 * alns_iters_limit)
-                    stage1_eval_budget_heavy = max(stage1_eval_budget_heavy, 12 * alns_iters_limit)
-                # For long-run experiments, do not early-stop just because the seed is feasible.
-                # Keep the <=1000 shortcut only for short iterations.
-                if int(g) == 0:
-                    stage1_target_obj = 1000.0 if int(args.alns_iters) <= 300 else None
-                else:
-                    stage1_target_obj = 1000.0
+                long_unbounded_run = bool((total_budget <= 0.0) and (int(args.alns_iters) >= 1000))
+                if not long_unbounded_run:
+                    if seed_exact_feasible:
+                        if run_profile == "turbo":
+                            stage1_eval_budget_total = 12000
+                            stage1_eval_budget_heavy = 5000
+                        else:
+                            stage1_eval_budget_total = 22000
+                            stage1_eval_budget_heavy = 9000
+                    else:
+                        stage1_eval_budget_total = 32000
+                        stage1_eval_budget_heavy = 16000
+                stage1_target_obj = None
 
-            stage1_restarts = 1 if no_seed else int(multistart_restarts_flag)
-            stage1_restarts = max(1, min(int(stage1_restarts), int(alns_iters_limit)))
-            # For gamma=0 on large-instance short runs, keep full budget in one trajectory.
-            if int(g) == 0 and int(alns_iters_limit) <= 1200:
-                stage1_restarts = 1
+            init_sol_best = alns_minimize(
+                init=init_for_alns,
+                evaluator=prof,
+                iters=(
+                    int(args.alns_iters)
+                    if ((forced_seed is not None) and math.isfinite(float(forced_seed_ms)))
+                    else (min(int(args.alns_iters), 320) if no_seed else int(args.alns_iters))
+                ),
+                start_T=1.0, cool=0.995,
+                S_near_by_j=S_near_by_j,
+                seed=args.seed,
+                task_shelf_mapping=task_shelf_mapping,
+                enable_place_tune=True,
+                enable_shelf_tune=True,
+                shelf_init=shelf_init_for_alns,
+                speed_profile=str(run_profile),
+                time_budget_sec=budget_stage1,
+                enable_strong_init=(not seed_exact_feasible),
+                strong_init_tries=(6 if (no_seed and (not seed_exact_feasible)) else 4),
+                strong_init_time_budget_sec=(12.0 if (no_seed and (not seed_exact_feasible)) else 0.0),
+                eval_budget_total=stage1_eval_budget_total,
+                eval_budget_heavy=stage1_eval_budget_heavy,
+                target_feasible_obj=stage1_target_obj,
+            )
 
-            start_pool: list[tuple[str, InitialSolution]] = []
-            if forced_seed is not None:
-                start_pool.append(("forced_seed", clone_initial_solution(forced_seed)))
-            if feasible_seed is not None:
-                start_pool.append(("history_seed", clone_initial_solution(feasible_seed)))
-            if (not no_seed) and (not cross_gamma_independent_mode) and (prev_best_sol is not None):
-                start_pool.append(("prev_gamma", clone_initial_solution(prev_best_sol)))
-            start_pool.append(("init", clone_initial_solution(init_sol)))
-
-            dedup_pool: list[tuple[str, InitialSolution]] = []
-            dedup_keys: set[tuple] = set()
-            for tag_seed, sol_seed in start_pool:
-                sig = initial_solution_signature(sol_seed)
-                if sig in dedup_keys:
-                    continue
-                dedup_keys.add(sig)
-                dedup_pool.append((str(tag_seed), clone_initial_solution(sol_seed)))
-            start_pool = dedup_pool
-
-            best_run_sol: InitialSolution | None = None
-            best_run_ms: float = float("inf")
-            remaining_iters = int(alns_iters_limit)
-
-            for restart_idx in range(int(stage1_restarts)):
-                runs_left = max(1, int(stage1_restarts) - int(restart_idx))
-                iters_this = max(1, int(remaining_iters // runs_left))
-                remaining_iters = max(0, int(remaining_iters - iters_this))
-
-                if restart_idx < len(start_pool):
-                    src_tag, start_seed = start_pool[int(restart_idx)]
-                    init_for_alns = clone_initial_solution(start_seed)
-                elif best_run_sol is not None:
-                    src_tag = "carry_best"
-                    init_for_alns = clone_initial_solution(best_run_sol)
-                else:
-                    src_tag = "init"
-                    init_for_alns = clone_initial_solution(init_sol)
-
-                budget_this = None if (budget_stage1 is None) else (float(budget_stage1) / float(stage1_restarts))
-                eval_total_this = stage1_eval_budget_total
-                eval_heavy_this = stage1_eval_budget_heavy
-                if int(stage1_restarts) > 1:
-                    if eval_total_this is not None:
-                        eval_total_this = max(1000, int(math.ceil(float(eval_total_this) / float(stage1_restarts))))
-                    if eval_heavy_this is not None:
-                        eval_heavy_this = max(500, int(math.ceil(float(eval_heavy_this) / float(stage1_restarts))))
-
-                run_seed = int(args.seed) + int(restart_idx) * 7919
-                print(
-                    f"[ALNS] stage1 restart {restart_idx + 1}/{stage1_restarts} "
-                    f"source={src_tag} iters={iters_this} seed={run_seed}"
-                )
-                prof_run = EvalProfiler(search_evaluator)
-                run_sol = alns_minimize(
-                    init=init_for_alns,
-                    evaluator=prof_run,
-                    evaluator_exact=evaluator_exact,
-                    iters=iters_this,
-                    start_T=1.0,
-                    cool=0.995,
-                    S_near_by_j=S_near_by_j,
-                    seed=run_seed,
-                    task_shelf_mapping=task_shelf_mapping,
-                    enable_place_tune=True,
-                    enable_shelf_tune=True,
-                    shelf_init=shelf_init_for_alns,
-                    speed_profile=str(run_profile),
-                    time_budget_sec=budget_this,
-                    enable_strong_init=True,
-                    strong_init_tries=(6 if no_seed else 4),
-                    strong_init_time_budget_sec=(12.0 if no_seed else 0.0),
-                    eval_budget_total=eval_total_this,
-                    eval_budget_heavy=eval_heavy_this,
-                    target_feasible_obj=stage1_target_obj,
-                    eval_layering=eval_layering_flag,
-                    max_exact_evals_per_iter=max_exact_evals_per_iter_flag,
-                    use_eval_cache=use_eval_cache_flag,
-                    use_shallow_copy=use_shallow_copy_flag,
-                    verbose=verbose_flag,
-                    enable_ejection_chain=enable_ejection_chain_flag,
-                    ejection_chain_prob=ejection_prob_flag,
-                    enable_ws_micro_reorder=enable_ws_micro_reorder_flag,
-                    ws_micro_reorder_prob=ws_micro_prob_flag,
-                )
-                prof_run.report(tag=f"[Profiler gamma={g} restart {restart_idx + 1}/{stage1_restarts}]")
-                ms_run, _ = evaluator_exact.evaluate(run_sol.routes, run_sol.shelf_seq, run_sol.place)
-                if math.isfinite(float(ms_run)):
-                    print(f"[ALNS] restart {restart_idx + 1} exact cmax={float(ms_run):.2f}")
-                else:
-                    print(f"[ALNS] restart {restart_idx + 1} exact cmax=inf")
-
-                if (best_run_sol is None) or (
-                    math.isfinite(float(ms_run))
-                    and ((not math.isfinite(float(best_run_ms))) or (float(ms_run) < float(best_run_ms) - 1e-9))
-                ):
-                    best_run_sol = clone_initial_solution(run_sol)
-                    best_run_ms = float(ms_run)
-
-                if (not no_seed) and math.isfinite(float(ms_run)):
-                    start_pool.append((f"restart_{restart_idx + 1}", clone_initial_solution(run_sol)))
-
-            init_sol_best = clone_initial_solution(best_run_sol) if best_run_sol is not None else clone_initial_solution(init_sol)
-
-            print(f"[ALNS] Done: best structure found for gamma={g}.")
+            print(f"[ALNS] Done: best structure found for γ={g}.")
+            prof.report(tag=f"[Profiler γ={g}]")
         else:
             init_sol_best = init_sol
             budget_stage2 = 0.0
 
-        # ========= 绗?0 灞傜粨鏋勬鏌ワ紙鐢?exact锛?========
+        # ========= 第 0 层结构检查（用 exact）=========
         from alns_min import basic_feasibility_check_level0
         _ = basic_feasibility_check_level0(
             routes=init_sol_best.routes,
@@ -2470,10 +2114,10 @@ def main():
             place=init_sol_best.place,
             evaluator=evaluator_exact,
             task_shelf_mapping=task_shelf_mapping,
-            verbose=verbose_flag,
+            verbose=bool(args.verbose),
         )
 
-        # ========= 璇勪及 makespan =========
+        # ========= 评估 makespan =========
         base_ms, _ = evaluator_exact.evaluate(init_sol.routes, init_sol.shelf_seq, init_sol.place)
         best_ms, best_diag = evaluator_exact.evaluate(
             init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
@@ -2485,7 +2129,6 @@ def main():
                 init_sol_best = alns_minimize(
                     init=init_sol_best,
                     evaluator=prof_rescue,
-                    evaluator_exact=evaluator_exact,
                     iters=min(int(args.alns_iters), 220),
                     start_T=0.8,
                     cool=0.996,
@@ -2498,17 +2141,8 @@ def main():
                     speed_profile="turbo",
                     time_budget_sec=float(budget_stage2),
                     relabel_interval=0,
-                    eval_layering=eval_layering_flag,
-                    max_exact_evals_per_iter=max_exact_evals_per_iter_flag,
-                    use_eval_cache=use_eval_cache_flag,
-                    use_shallow_copy=use_shallow_copy_flag,
-                    verbose=verbose_flag,
-                    enable_ejection_chain=enable_ejection_chain_flag,
-                    ejection_chain_prob=ejection_prob_flag,
-                    enable_ws_micro_reorder=enable_ws_micro_reorder_flag,
-                    ws_micro_reorder_prob=ws_micro_prob_flag,
                 )
-                prof_rescue.report(tag=f"[Rescue gamma={g}]")
+                prof_rescue.report(tag=f"[Rescue γ={g}]")
                 best_ms, best_diag = evaluator_exact.evaluate(
                     init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
                 )
@@ -2528,8 +2162,7 @@ def main():
                 init_sol_try = alns_minimize(
                     init=init_emg,
                     evaluator=prof_emg,
-                    evaluator_exact=evaluator_exact,
-                    iters=alns_iters_limit,
+                    iters=max(800, int(args.alns_iters)),
                     start_T=1.0,
                     cool=0.996,
                     S_near_by_j=S_near_by_j,
@@ -2544,17 +2177,8 @@ def main():
                     eval_budget_total=56000,
                     eval_budget_heavy=33000,
                     target_feasible_obj=580.0,
-                    eval_layering=eval_layering_flag,
-                    max_exact_evals_per_iter=max_exact_evals_per_iter_flag,
-                    use_eval_cache=use_eval_cache_flag,
-                    use_shallow_copy=use_shallow_copy_flag,
-                    verbose=verbose_flag,
-                    enable_ejection_chain=enable_ejection_chain_flag,
-                    ejection_chain_prob=ejection_prob_flag,
-                    enable_ws_micro_reorder=enable_ws_micro_reorder_flag,
-                    ws_micro_reorder_prob=ws_micro_prob_flag,
                 )
-                prof_emg.report(tag=f"[Emergency gamma={g} seed={s_try}]")
+                prof_emg.report(tag=f"[Emergency γ={g} seed={s_try}]")
                 ms_try, diag_try = evaluator_exact.evaluate(
                     init_sol_try.routes, init_sol_try.shelf_seq, init_sol_try.place
                 )
@@ -2621,48 +2245,35 @@ def main():
         if no_seed and math.isfinite(float(best_ms)):
             if int(g) == 0 and float(best_ms) <= 500.0 and int(args.alns_iters) <= 300:
                 print("[ALNS] no-seed polish skipped: strong exact seed already found.")
+            elif (run_profile == "turbo") and (total_budget <= 0.0) and (int(args.alns_iters) >= 1000):
+                print("[ALNS] no-seed polish skipped in turbo long-run mode.")
+            elif (run_profile == "turbo") and (int(args.alns_iters) <= 300):
+                print("[ALNS] no-seed polish skipped in turbo short-run mode.")
             else:
                 print("[ALNS] no-seed polish stage: short fast ALNS refinement.")
-                polish_evaluator = evaluator_hard_partial if int(g) == 0 else evaluator_fast
+                polish_evaluator = evaluator_fast if (run_profile == "turbo") else (evaluator_hard_partial if int(g) == 0 else evaluator_fast)
                 prof_polish = EvalProfiler(polish_evaluator)
-                polish_time_budget = 35.0
-                polish_eval_total = 42000
-                polish_eval_heavy = 26000
-                if alns_iters_limit >= 2000:
-                    polish_time_budget = 120.0
-                    polish_eval_total = max(polish_eval_total, 14 * alns_iters_limit)
-                    polish_eval_heavy = max(polish_eval_heavy, 9 * alns_iters_limit)
                 polish_sol = alns_minimize(
                     init=init_sol_best,
                     evaluator=prof_polish,
-                    evaluator_exact=evaluator_exact,
-                    iters=min(alns_iters_limit, max(120, alns_iters_limit // 2)),
+                    iters=min(320, max(120, int(args.alns_iters) // 2)),
                     start_T=0.9,
                     cool=0.997,
                     S_near_by_j=S_near_by_j,
                     seed=int(args.seed) + 271828,
                     task_shelf_mapping=task_shelf_mapping,
-                    enable_place_tune=True,
-                    enable_shelf_tune=True,
+                    enable_place_tune=(run_profile != "turbo"),
+                    enable_shelf_tune=(run_profile != "turbo"),
                     shelf_init=shelf_init_for_alns,
-                    speed_profile="balanced",
-                    time_budget_sec=float(polish_time_budget),
+                    speed_profile=("turbo" if run_profile == "turbo" else "balanced"),
+                    time_budget_sec=(None if total_budget <= 0.0 else 35.0),
                     relabel_interval=20,
                     enable_strong_init=False,
                     feasible_first=False,
-                    eval_budget_total=int(polish_eval_total),
-                    eval_budget_heavy=int(polish_eval_heavy),
-                    eval_layering=eval_layering_flag,
-                    max_exact_evals_per_iter=max_exact_evals_per_iter_flag,
-                    use_eval_cache=use_eval_cache_flag,
-                    use_shallow_copy=use_shallow_copy_flag,
-                    verbose=verbose_flag,
-                    enable_ejection_chain=enable_ejection_chain_flag,
-                    ejection_chain_prob=ejection_prob_flag,
-                    enable_ws_micro_reorder=enable_ws_micro_reorder_flag,
-                    ws_micro_reorder_prob=ws_micro_prob_flag,
+                    eval_budget_total=(12000 if run_profile == "turbo" else 42000),
+                    eval_budget_heavy=(5000 if run_profile == "turbo" else 26000),
                 )
-                prof_polish.report(tag=f"[Polish gamma={g}]")
+                prof_polish.report(tag=f"[Polish γ={g}]")
                 ms_polish, diag_polish = evaluator_exact.evaluate(
                     polish_sol.routes, polish_sol.shelf_seq, polish_sol.place
                 )
@@ -2681,16 +2292,25 @@ def main():
             best_ms, best_diag = evaluator_exact.evaluate(
                 init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
             )
-        print(f"[ALNS] Exact makespan: base={base_ms:.2f} -> best={best_ms:.2f} (delta={base_ms - best_ms:+.2f})")
+        print(f"[ALNS] Exact makespan: base={base_ms:.2f} → best={best_ms:.2f} (Δ={base_ms - best_ms:+.2f})")
 
-        if verbose_flag:
+        if args.verbose:
             print_alns_solution(g, init_sol_best, evaluator_exact)
 
         if fast_post_mode:
-            # turbo锛氳烦杩?WS-fix 浜屾閲嶈瘎浼颁笌 full diag锛岀洿鎺ヨ惤 bundle锛屼紭鍏堥€熷害
-            ms_final, diag_final = float(best_ms), best_diag
+            # turbo: keep fast path, but sync place with end_shelf_final once for consistent replay.
+            if isinstance(best_diag, dict) and ("end_shelf_final" in best_diag):
+                for j, s in best_diag["end_shelf_final"].items():
+                    if int(j) in J:
+                        init_sol_best.place[int(j)] = int(s)
+            ms_final, diag_final = evaluator_exact.evaluate(
+                init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
+            )
+            ms_final = float(ms_final)
+            if not math.isfinite(ms_final):
+                ms_final, diag_final = float(best_ms), best_diag
         else:
-            # === WS 鍧楀唴閲嶆帓涓€娆★紙璁╃粨鏋勬洿绋冲畾锛涗篃璁?bundle 鏇寸ǔ瀹氾級 ===
+            # === WS 块内重排一次（让结构更稳定；也让 bundle 更稳定） ===
             routes_wsfix: dict[int, list[int]] = {}
             for r, seq in init_sol_best.routes.items():
                 routes_wsfix[int(r)] = reorder_contiguous_ws_blocks(seq, pi, ws_fixed_seq)
@@ -2708,7 +2328,7 @@ def main():
                     if int(j) in J:
                         init_sol_best.place[int(j)] = int(s)
 
-            # 鍐嶇畻涓€娆★紝纭繚 diag 涓庢渶缁?place 涓€鑷达紙鍙湪闇€瑕佸鍑?璇︾粏鏃舵墠鍋氾級
+            # 再算一次，确保 diag 与最终 place 一致（只在需要导出/详细时才做）
             if need_full_diag:
                 ms_final, diag_final = evaluator_exact.evaluate(
                     init_sol_best.routes, init_sol_best.shelf_seq, init_sol_best.place
@@ -2718,25 +2338,23 @@ def main():
 
         prev_best_sol = init_sol_best
 
-        # ===== 淇濆瓨 ALNS bundle锛坈ross-gamma 鐢級=====
-        if fast_post_mode:
-            cell_sigma = {}
-        else:
-            # 1) 鐢?event gate 璺戜竴娆★紝鎶?蟽锛堢珯浣嶉『搴忥級
-            cell_sigma = build_cell_sigma_from_event_run(
-                evaluator_factory=evaluator_factory_for_cross,
-                eval_gamma=int(g),  # 鐢ㄢ€滃綋鍓?gamma 鐨?event 浠跨湡鈥濇娊椤哄簭
-                routes=init_sol_best.routes,
-                shelf_seq=init_sol_best.shelf_seq,
-                place=init_sol_best.place,
-                J_set=set(int(x) for x in J),
-            )
+        # ===== 保存 ALNS bundle（cross-gamma 用）=====
+        # 1) 用 event gate 跑一次，抽 σ（站位顺序）
+        # turbo 也保留该步骤，保证 bundle 在 cross-gamma 下复评稳定。
+        cell_sigma = build_cell_sigma_from_event_run(
+            evaluator_factory=evaluator_factory_for_cross,
+            eval_gamma=int(g),  # 用“当前 gamma 的 event 仿真”抽顺序
+            routes=init_sol_best.routes,
+            shelf_seq=init_sol_best.shelf_seq,
+            place=init_sol_best.place,
+            J_set=set(int(x) for x in J),
+        )
 
-            # 鍙€夛細浣犲叧蹇冪殑 cell=23 鎵撳嵃鍑烘潵鐪嬬湅
-            if 23 in cell_sigma:
-                print(f"[SIGMA] srcG={g} cell=23 order={cell_sigma[23]}")
+        # 可选：你关心的 cell=23 打印出来看看
+        if 23 in cell_sigma:
+            print(f"[SIGMA] srcG={g} cell=23 order={cell_sigma[23]}")
 
-        # 2) 鍐欏叆 bundle
+        # 2) 写入 bundle
         alns_path = save_bundle_json(
             prefix=prefix,
             tag="alns",
@@ -2759,7 +2377,7 @@ def main():
             except Exception as e:
                 print(f"[ALNS] turbo cache update failed: {type(e).__name__}: {e}")
 
-        # ===== 鍙€夛細瀵煎嚭 evaluator diag锛圓LNS-only 鐗堬級=====
+        # ===== 可选：导出 evaluator diag（ALNS-only 版）=====
         if args.export_eval_diag and isinstance(diag_final, dict):
             try:
                 export_evaluator_diagnostics(
@@ -2775,15 +2393,15 @@ def main():
                     diag=diag_final,
                     outdir="solution_exports",
                 )
-                print(f"[EXPORT-EVAL] ALNS diag exported for gamma={g}")
+                print(f"[EXPORT-EVAL] ALNS diag exported for γ={g}")
             except Exception as e:
                 print(f"[EXPORT-EVAL] ALNS export failed: {type(e).__name__}: {e}")
 
 # =========================
-# Cross-gamma 妫€鏌ワ紙缁熶竴璺戯級
+# Cross-gamma 检查（统一跑）
     # =========================
     # =========================
-    # Cross-gamma 妫€鏌ワ紙鍙 ALNS锛?
+    # Cross-gamma 检查（只对 ALNS）
     # =========================
     if args.cross_gamma_check:
         print("\n" + "=" * 70)
@@ -2797,7 +2415,7 @@ def main():
                 bundles_by_source_gamma=alns_bundles_by_gamma,
                 eval_gammas=gamma_list,
                 evaluator_factory=evaluator_factory_for_cross,
-                milp_opt_by_eval_gamma=None,   # 鉁?ALNS-only锛氫笉绠?regret
+                milp_opt_by_eval_gamma=None,   # ✅ ALNS-only：不算 regret
                 outdir="solution_exports",
             )
         else:
@@ -2805,5 +2423,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

@@ -1721,7 +1721,7 @@ def optimize_warehouse(
     model.setParam(GRB.Param.TimeLimit, 400)
 
     # 2) 1000 秒无 incumbent 改进就停3000500020001000800500
-    NO_IMPROVE_LIMIT = 300.0
+    NO_IMPROVE_LIMIT = 1000.0
 
     # 用 model 上的属性保存“上次改进时间”和“最好 incumbent”
     model._last_improve_time = 0.0

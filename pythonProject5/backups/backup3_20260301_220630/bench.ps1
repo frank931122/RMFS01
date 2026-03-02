@@ -6,17 +6,8 @@ param(
   [string]$Baseline = "bench_baseline_demo01.json",
   [double]$Tol = 0.001,
   [int]$EvalLayering = 0,
-  [int]$MaxExactEvalsPerIter = 1,
-  [int]$UseEvalCache = 0,
-  [int]$UseShallowCopy = 0,
-  [int]$Verbose = 0
+  [int]$MaxExactEvalsPerIter = 1
 )
-
-# Force UTF-8 for this PowerShell session and Python I/O.
-chcp 65001 | Out-Null
-$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-$env:PYTHONIOENCODING = "utf-8"
-$env:PYTHONUTF8 = "1"
 
 # bench.ps1 放在 pythonProject5 目录；$PSScriptRoot 就是它所在目录
 $ProjectDir = $PSScriptRoot
@@ -38,9 +29,6 @@ Set-Location $ProjectDir
   --gammas $Gammas `
   --eval-layering $EvalLayering `
   --max-exact-evals-per-iter $MaxExactEvalsPerIter `
-  --use-eval-cache $UseEvalCache `
-  --use-shallow-copy $UseShallowCopy `
-  --verbose $Verbose `
   --bench-compare $Baseline `
   --bench-tol $Tol
 

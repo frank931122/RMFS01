@@ -5593,8 +5593,6 @@ def alns_minimize(
     eval_budget_total: Optional[int] = None,
     eval_budget_heavy: Optional[int] = None,
     target_feasible_obj: Optional[float] = None,
-    feasible_escape_prob: float = 0.04,
-    feasible_escape_relax: float = 2.00,
     eval_layering: int = 0,
     max_exact_evals_per_iter: int = 1,
     use_eval_cache: int = 0,
@@ -6038,8 +6036,6 @@ def alns_minimize(
         STAG_WS = 40
         STAG_LIMIT = 120
     P_WS_FOCUSED = 0.70
-    FEAS_ESCAPE_PROB = max(0.0, min(0.25, float(feasible_escape_prob)))
-    FEAS_ESCAPE_RELAX = max(0.0, float(feasible_escape_relax))
 
     # ????????????????????????
     REHEAT_SOFT = max(2.50, 0.45 * float(T))
@@ -7314,18 +7310,6 @@ def alns_minimize(
                 # cand infeas ??????
                 if prev_cur_feas:
                     accept = False
-                    # Controlled escape from feasible local minima when search stagnates.
-                    if (stall >= STAG_WS) and (FEAS_ESCAPE_PROB > 0.0):
-                        cur_inf = _safe_infeas_scalar(cur_details, evaluator, obj=cur_obj)
-                        cand_inf = _safe_infeas_scalar(cand_details, evaluator, obj=cand_obj)
-                        allowed_inf = max(1.0, cur_inf) * (1.0 + FEAS_ESCAPE_RELAX)
-                        if cand_inf <= allowed_inf:
-                            esc_prob = min(
-                                FEAS_ESCAPE_PROB,
-                                FEAS_ESCAPE_PROB * (1.0 + 0.02 * max(0, stall - STAG_WS)),
-                            )
-                            if rng.random() < esc_prob:
-                                accept = True
                 else:
                     accept = False
         else:

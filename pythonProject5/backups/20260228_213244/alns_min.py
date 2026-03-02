@@ -1,16 +1,14 @@
 ﻿from __future__ import annotations
 
 import copy
-import json
 import math
-import os
 import random
 import time
 from itertools import permutations
 from typing import Dict, List, Tuple, Set, Optional
 
 from evaluator import RobustEvaluator
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 
 # =========================
 #        Feasibility
@@ -1984,158 +1982,6 @@ def destroy_critical_single(
     return removed_order, removed, routes
 
 
-def destroy_critical_batch(
-    *,
-    routes: Dict[int, List[int]],
-    evaluator: RobustEvaluator,
-    rng: random.Random,
-    q_hint: Optional[Dict[int, float]] = None,
-    min_k: int = 3,
-    max_k: int = 6,
-) -> Tuple[List[int], Set[int], Dict[int, List[int]]]:
-    """
-    Medium-size critical destroy:
-      - pick one bottleneck route (highest tail q / longest route fallback)
-      - remove one contiguous batch around a critical task in that route
-    """
-    routes = _dc_routes(routes)
-    present: Set[int] = set()
-    for seq in routes.values():
-        present.update(int(x) for x in (seq or []))
-    if not present:
-        return [], set(), routes
-
-    q_map: Dict[int, float] = {}
-    if isinstance(q_hint, dict):
-        for k, v in q_hint.items():
-            try:
-                kk = int(k)
-                vv = float(v)
-                if math.isfinite(vv):
-                    q_map[kk] = vv
-            except Exception:
-                pass
-
-    route_scores: List[Tuple[float, int, int]] = []
-    for r, seq in routes.items():
-        seq2 = [int(x) for x in (seq or [])]
-        if not seq2:
-            continue
-        q_tail = max((float(q_map.get(int(j), 0.0)) for j in seq2), default=0.0)
-        route_scores.append((float(q_tail), int(len(seq2)), int(r)))
-    if not route_scores:
-        return [], set(), routes
-    route_scores.sort(reverse=True)
-    r_star = int(route_scores[0][2])
-    seq_star = [int(x) for x in (routes.get(r_star, []) or [])]
-    if not seq_star:
-        return [], set(), routes
-
-    k_lo = max(2, int(min_k))
-    k_hi = max(k_lo, min(int(max_k), len(seq_star)))
-    k = int(rng.randint(k_lo, k_hi))
-
-    idx_star = len(seq_star) - 1
-    if q_map:
-        best_q = -1e100
-        best_idx = idx_star
-        for i, j in enumerate(seq_star):
-            qv = float(q_map.get(int(j), 0.0))
-            if qv > best_q:
-                best_q = qv
-                best_idx = int(i)
-        idx_star = int(best_idx)
-
-    if len(seq_star) <= k:
-        removed_order = list(seq_star)
-    else:
-        start_low = max(0, int(idx_star) - (k - 1))
-        start_high = min(int(idx_star), len(seq_star) - k)
-        start = int(rng.randint(start_low, start_high))
-        removed_order = seq_star[start : start + k]
-
-    removed = set(int(x) for x in removed_order)
-    for r in list(routes.keys()):
-        routes[int(r)] = [int(j) for j in routes[int(r)] if int(j) not in removed]
-    return removed_order, removed, routes
-
-
-def destroy_dual_tail_critical(
-    *,
-    routes: Dict[int, List[int]],
-    evaluator: RobustEvaluator,
-    rng: random.Random,
-    q_hint: Optional[Dict[int, float]] = None,
-    tail_window: int = 12,
-    max_per_route: int = 2,
-) -> Tuple[List[int], Set[int], Dict[int, List[int]]]:
-    """
-    Tiny critical destroy for large instances:
-      - choose 1-2 bottleneck routes
-      - remove route-tail critical tasks (very small neighborhood)
-    """
-    routes = _dc_routes(routes)
-    q_map: Dict[int, float] = {}
-    if isinstance(q_hint, dict):
-        for k, v in q_hint.items():
-            try:
-                kk = int(k)
-                vv = float(v)
-                if math.isfinite(vv):
-                    q_map[kk] = vv
-            except Exception:
-                pass
-
-    route_scores: List[Tuple[float, int, int]] = []
-    for r, seq in routes.items():
-        rr = int(r)
-        seq2 = [int(x) for x in (seq or [])]
-        if not seq2:
-            continue
-        win = max(1, min(int(tail_window), len(seq2)))
-        tail = seq2[-win:]
-        tail_q = max((float(q_map.get(int(j), 0.0)) for j in tail), default=0.0)
-        route_scores.append((float(tail_q), int(len(seq2)), rr))
-    if not route_scores:
-        return [], set(), routes
-
-    route_scores.sort(reverse=True)
-    pick_routes = [int(route_scores[0][2])]
-    if len(route_scores) >= 2:
-        pick_routes.append(int(route_scores[1][2]))
-
-    removed_order: List[int] = []
-    removed_set: Set[int] = set()
-    per_r_cap = max(1, int(max_per_route))
-    for rr in pick_routes:
-        seq = [int(x) for x in (routes.get(int(rr), []) or [])]
-        if not seq:
-            continue
-        win = max(1, min(int(tail_window), len(seq)))
-        tail = seq[-win:]
-        if q_map:
-            tail_sorted = sorted(tail, key=lambda j: float(q_map.get(int(j), 0.0)), reverse=True)
-        else:
-            tail_sorted = list(reversed(tail))
-        for j in tail_sorted[:per_r_cap]:
-            jj = int(j)
-            if jj in removed_set:
-                continue
-            removed_order.append(jj)
-            removed_set.add(jj)
-        if (len(seq) >= 2) and (len(removed_order) < 4) and (rng.random() < 0.30):
-            tail_prev = int(seq[-2])
-            if tail_prev not in removed_set:
-                removed_order.append(tail_prev)
-                removed_set.add(tail_prev)
-
-    if not removed_set:
-        return [], set(), routes
-    for r in list(routes.keys()):
-        routes[int(r)] = [int(j) for j in routes[int(r)] if int(j) not in removed_set]
-    return removed_order, removed_set, routes
-
-
 # =========================
 #          Repair
 # =========================
@@ -2494,14 +2340,6 @@ def repair_greedy_insert_with_place(
                         remaining_unfixed.discard(int(j))
                         continue
                 raise RuntimeError(f"strict_construct: no legal candidate for task {j}")
-            if require_finite_eval and strict_bruteforce_fallback:
-                brute = _strict_bruteforce_pick(j=int(j), cand_shelves_local=cand_shelves)
-                if brute is not None:
-                    _, _, rr, _, ss, seq_ins = brute
-                    routes[int(rr)] = list(seq_ins)
-                    place[int(j)] = int(ss)
-                    remaining_unfixed.discard(int(j))
-                    continue
             # ????????????????????????
             r_fb = _least_loaded_agv(routes, R_ids)
             routes[int(r_fb)].append(j)
@@ -2572,14 +2410,6 @@ def repair_greedy_insert_with_place(
                         remaining_unfixed.discard(int(j))
                         continue
                 raise RuntimeError(f"strict_construct: no evaluated candidate for task {j}")
-            if require_finite_eval and strict_bruteforce_fallback:
-                brute = _strict_bruteforce_pick(j=int(j), cand_shelves_local=cand_shelves)
-                if brute is not None:
-                    _, _, rr, _, ss, seq_ins = brute
-                    routes[int(rr)] = list(seq_ins)
-                    place[int(j)] = int(ss)
-                    remaining_unfixed.discard(int(j))
-                    continue
             # Fallback to cheapest unevaluated candidate when strict mode is off.
             _, rr, pp, ss, seq_ins = cheap_pool[0]
             routes[int(rr)] = list(seq_ins)
@@ -2621,8 +2451,6 @@ def repair_greedy_insert_with_place_ordered(
     # shared evaluation budgets across ordered insertion
     max_evals_per_task: Optional[int] = None,
     max_evals_total: Optional[int] = None,
-    preselect_m: int = 12,
-    preselect_per_pos_shelves: int = 2,
     strict_construct: bool = False,
     strict_bruteforce_fallback: bool = False,
     require_finite_eval: bool = False,
@@ -2654,84 +2482,7 @@ def repair_greedy_insert_with_place_ordered(
         max_pos_per_route=max_pos_per_route,
         max_evals_per_task=max_evals_per_task,
         max_evals_total=max_evals_total,
-        preselect_m=preselect_m,
-        preselect_per_pos_shelves=preselect_per_pos_shelves,
         copy_inputs=True,
-        strict_construct=strict_construct,
-        strict_bruteforce_fallback=strict_bruteforce_fallback,
-        require_finite_eval=require_finite_eval,
-        eval_fail_cost=eval_fail_cost,
-    )
-
-
-def repair_greedy_insert_with_place_difficult_ordered(
-    *,
-    routes: Dict[int, List[int]],
-    shelf_seq: Dict[int, List[int]],
-    place: Dict[int, int],
-    evaluator: RobustEvaluator,
-    removed: Set[int],
-    rng: random.Random,
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]] = None,
-    shelf_init_override: Optional[Dict[int, int]] = None,
-    max_place_try_each: int = 6,
-    top_k_random: int = 1,
-    extra_random_shelves: int = 0,
-    force_all_shelves: bool = False,
-    max_agv_candidates: Optional[int] = None,
-    max_pos_per_route: Optional[int] = None,
-    max_evals_per_task: Optional[int] = None,
-    max_evals_total: Optional[int] = None,
-    preselect_m: int = 12,
-    preselect_per_pos_shelves: int = 2,
-    strict_construct: bool = False,
-    strict_bruteforce_fallback: bool = False,
-    require_finite_eval: bool = False,
-    eval_fail_cost: float = 1e30,
-) -> Tuple[Dict[int, List[int]], Dict[int, int]]:
-    """
-    Repair with a harder-first insertion order.
-    Tasks with larger nominal duration are inserted earlier to reduce
-    downstream dead-ends on large instances.
-    """
-    removed_set = set(int(x) for x in (removed or set()))
-    if not removed_set:
-        return _dc_routes(routes), _dc_place(place)
-
-    d_map = getattr(evaluator, "D", {}) or {}
-    pi_map = getattr(evaluator, "pi", {}) or {}
-    ws_idx = _ws_index(getattr(evaluator, "ws_fixed_seq", {}) or {})
-
-    def _order_key(jj: int) -> Tuple[float, int, float]:
-        j = int(jj)
-        d_val = float(d_map.get(j, 0.0))
-        ws = int(pi_map.get(j, -1))
-        rank = int(ws_idx.get(ws, {}).get(j, 10 ** 9))
-        return (-d_val, rank, rng.random())
-
-    removed_order = sorted((int(x) for x in removed_set), key=_order_key)
-
-    return repair_greedy_insert_with_place_ordered(
-        routes=routes,
-        shelf_seq=shelf_seq,
-        place=place,
-        evaluator=evaluator,
-        removed_order=removed_order,
-        rng=rng,
-        S_near_by_j=S_near_by_j,
-        task_shelf_mapping=task_shelf_mapping,
-        shelf_init_override=shelf_init_override,
-        max_place_try_each=max_place_try_each,
-        top_k_random=top_k_random,
-        extra_random_shelves=extra_random_shelves,
-        force_all_shelves=force_all_shelves,
-        max_agv_candidates=max_agv_candidates,
-        max_pos_per_route=max_pos_per_route,
-        max_evals_per_task=max_evals_per_task,
-        max_evals_total=max_evals_total,
-        preselect_m=preselect_m,
-        preselect_per_pos_shelves=preselect_per_pos_shelves,
         strict_construct=strict_construct,
         strict_bruteforce_fallback=strict_bruteforce_fallback,
         require_finite_eval=require_finite_eval,
@@ -3373,289 +3124,6 @@ def cross_vehicle_block_move_once(
     return routes, place, False, float(base_obj)
 
 
-def cross_vehicle_ejection_chain_once(
-    *,
-    routes: Dict[int, List[int]],
-    place: Dict[int, int],
-    shelf_seq: Dict[int, List[int]],
-    evaluator: RobustEvaluator,
-    evaluator_exact: Optional[RobustEvaluator],
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]],
-    shelf_init_override: Optional[Dict[int, int]],
-    rng: random.Random,
-    min_seg: int = 6,
-    max_seg: int = 15,
-    max_trials: int = 1,
-    max_pos_samples: int = 3,
-    max_s_samples: int = 2,
-    max_evals: int = 3,
-    max_exact_trials: int = 1,
-    exact_gate_rel: float = 0.003,
-) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
-    """
-    Large-segment cross-vehicle ejection-chain:
-      1) move a long segment from donor route A -> receiver route B
-      2) eject a shorter segment from B -> another route C
-      3) exact-gate only for clearly promising candidates
-    """
-    routes = _dc_routes(routes)
-    place = _dc_place(place)
-    routes_norm = _normalize_ws_blocks(routes, evaluator)
-    base_obj, _ = evaluator.evaluate(routes_norm, shelf_seq, place)
-    base_obj = float(base_obj)
-
-    base_exact: Optional[float] = None
-    if evaluator_exact is not None:
-        try:
-            base_exact_v, _ = evaluator_exact.evaluate(routes_norm, shelf_seq, place)
-            base_exact = float(base_exact_v)
-            if not math.isfinite(float(base_exact)):
-                base_exact = None
-        except Exception:
-            base_exact = None
-
-    R_ids = sorted(int(r) for r in evaluator.R)
-    seg_min_eff = max(2, int(min_seg))
-    seg_max_eff = max(seg_min_eff, int(max_seg))
-    if len(R_ids) < 2:
-        return routes_norm, place, False, base_obj
-    donor_ids = [int(r) for r in R_ids if len(routes_norm.get(int(r), [])) >= seg_min_eff]
-    if not donor_ids:
-        return routes_norm, place, False, base_obj
-
-    pre = build_rule_prechecker(
-        evaluator=evaluator,
-        shelf_seq=shelf_seq,
-        task_shelf_mapping=task_shelf_mapping,
-        shelf_init_override=shelf_init_override,
-    )
-    proxy = FastProxyEvaluatorLB(evaluator, pre)
-
-    def _sample_positions(seq: List[int], k: int) -> List[int]:
-        all_pos = _ws_block_boundary_positions(seq, evaluator.pi)
-        all_pos = sorted(set(int(p) for p in all_pos))
-        if len(all_pos) <= int(k):
-            return all_pos
-        must = [0, len(seq)]
-        mid = [int(p) for p in all_pos if int(p) not in set(must)]
-        need = max(0, int(k) - len(set(must)))
-        pick = rng.sample(mid, min(need, len(mid))) if (need > 0 and mid) else []
-        return sorted(set(int(x) for x in (must + pick)))
-
-    cand_pool: List[Tuple[float, Dict[int, List[int]], Dict[int, int]]] = []
-    for _ in range(max(1, int(max_trials))):
-        r_from = int(rng.choice(donor_ids))
-        seq_from = [int(x) for x in (routes_norm.get(int(r_from), []) or [])]
-        if len(seq_from) < seg_min_eff:
-            continue
-        r_to = int(rng.choice([r for r in R_ids if int(r) != int(r_from)]))
-        seq_to = [int(x) for x in (routes_norm.get(int(r_to), []) or [])]
-
-        seg_hi = min(seg_max_eff, len(seq_from))
-        if seg_hi < seg_min_eff:
-            continue
-        seg_len = int(rng.randint(seg_min_eff, seg_hi))
-        i0 = int(rng.randrange(0, len(seq_from) - seg_len + 1))
-        moved_block = [int(x) for x in seq_from[i0 : i0 + seg_len]]
-        seq_from_rem = [int(x) for x in (seq_from[:i0] + seq_from[i0 + seg_len :])]
-
-        r_back_choices = [int(r) for r in R_ids if int(r) != int(r_to)]
-        if not r_back_choices:
-            continue
-
-        pos_to_cands = _sample_positions(seq_to, max(2, int(max_pos_samples)))
-        for pos_to in pos_to_cands:
-            pos_to = int(pos_to)
-            seq_to_ins = list(seq_to)
-            for off, jj in enumerate(moved_block):
-                seq_to_ins.insert(int(pos_to) + int(off), int(jj))
-
-            if len(seq_to_ins) <= 2:
-                continue
-            e_len_hi = min(max(2, seg_len // 2), len(seq_to_ins) - 1)
-            e_len_lo = 2
-            if e_len_hi < e_len_lo:
-                continue
-            e_len = int(rng.randint(e_len_lo, e_len_hi))
-            ins_lo = int(pos_to)
-            ins_hi = int(pos_to + seg_len - 1)
-            e_starts = [
-                int(st)
-                for st in range(0, len(seq_to_ins) - e_len + 1)
-                if ((int(st) + e_len - 1) < ins_lo) or (int(st) > ins_hi)
-            ]
-            if not e_starts:
-                continue
-            e_start = int(rng.choice(e_starts))
-            ejected = [int(x) for x in seq_to_ins[e_start : e_start + e_len]]
-            seq_to_fin = [int(x) for x in (seq_to_ins[:e_start] + seq_to_ins[e_start + e_len :])]
-
-            r_back = min(r_back_choices, key=lambda rr: len(routes_norm.get(int(rr), [])))
-            if rng.random() < 0.35:
-                r_back = int(rng.choice(r_back_choices))
-            seq_back = [int(x) for x in (routes_norm.get(int(r_back), []) or [])]
-            pos_back_cands = _sample_positions(seq_back, max(2, int(max_pos_samples) - 1))
-            pos_back = int(rng.choice(pos_back_cands))
-            seq_back_new = list(seq_back)
-            for off, jj in enumerate(ejected):
-                seq_back_new.insert(int(pos_back) + int(off), int(jj))
-
-            cand_routes = _dc_routes(routes_norm)
-            cand_routes[int(r_from)] = _normalize_one_route_ws_blocks(seq_from_rem, evaluator)
-            cand_routes[int(r_to)] = _normalize_one_route_ws_blocks(seq_to_fin, evaluator)
-            cand_routes[int(r_back)] = _normalize_one_route_ws_blocks(seq_back_new, evaluator)
-            cand_routes = _normalize_ws_blocks(cand_routes, evaluator)
-
-            moved_tasks = set(int(x) for x in moved_block)
-            moved_tasks.update(int(x) for x in ejected)
-            cand_place = _dc_place(place)
-            for jj in moved_tasks:
-                s_cands = _cand_end_shelves_for_task(
-                    int(jj),
-                    place=cand_place,
-                    S_near_by_j=S_near_by_j,
-                    evaluator=evaluator,
-                    shelf_seq=shelf_seq,
-                    task_shelf_mapping=task_shelf_mapping,
-                    shelf_init_override=shelf_init_override,
-                    must_include_prev_or_init=True,
-                    max_keep=max(6, int(max_s_samples) * 2),
-                )
-                s_cands = _augment_shelf_candidates(
-                    int(jj),
-                    s_cands,
-                    evaluator=evaluator,
-                    rng=rng,
-                    force_all_shelves=False,
-                    extra_random_shelves=0,
-                    cap_total=max(8, int(max_s_samples) + 2),
-                )
-                if not s_cands:
-                    continue
-                keep = [int(x) for x in s_cands[: max(1, int(max_s_samples))]]
-                pick_s = int(keep[0])
-                if len(keep) >= 2 and rng.random() < 0.28:
-                    pick_s = int(rng.choice(keep))
-                cand_place[int(jj)] = int(pick_s)
-
-            lb = proxy.solution_lb(
-                routes=cand_routes,
-                place=cand_place,
-                stop_at=base_obj if math.isfinite(base_obj) else None,
-            )
-            if math.isfinite(base_obj) and (float(lb) >= float(base_obj) - 1e-9):
-                continue
-            cand_pool.append((float(lb), cand_routes, cand_place))
-
-    if not cand_pool:
-        return routes_norm, place, False, base_obj
-    cand_pool.sort(key=lambda x: x[0])
-
-    eval_k = min(max(1, int(max_evals)), len(cand_pool))
-    exact_limit = max(0, int(max_exact_trials))
-    exact_used = 0
-    gate_abs = max(1.0, abs(float(base_obj)) * max(0.0, float(exact_gate_rel)))
-    for idx in range(eval_k):
-        _, rr, pp = cand_pool[idx]
-        obj_fast, _ = evaluator.evaluate(rr, shelf_seq, pp)
-        obj_fast = float(obj_fast)
-        if not (obj_fast < float(base_obj) - 1e-9):
-            continue
-
-        need_exact = bool(
-            (evaluator_exact is not None)
-            and (exact_used < exact_limit)
-            and (obj_fast <= float(base_obj) - float(gate_abs))
-        )
-        if need_exact:
-            exact_used += 1
-            obj_exact, _ = evaluator_exact.evaluate(rr, shelf_seq, pp)
-            obj_exact = float(obj_exact)
-            if base_exact is None:
-                if math.isfinite(obj_exact):
-                    return rr, pp, True, obj_exact
-            elif math.isfinite(obj_exact) and (obj_exact < float(base_exact) - 1e-9):
-                return rr, pp, True, obj_exact
-            continue
-
-        return rr, pp, True, obj_fast
-
-    return routes_norm, place, False, base_obj
-
-
-def ws_micro_reorder_idle_swap_once(
-    *,
-    routes: Dict[int, List[int]],
-    place: Dict[int, int],
-    shelf_seq: Dict[int, List[int]],
-    evaluator: RobustEvaluator,
-    rng: random.Random,
-    max_trials: int = 8,
-    max_swap_span: int = 3,
-    idle_window_cap: float = 240.0,
-) -> Tuple[Dict[int, List[int]], bool, float]:
-    """
-    WS-neighborhood micro reorder:
-      - swap two nearby tasks only when their q-time gap is within idle_window_cap
-      - keep operation tiny (adjacent/nearby) to preserve feasibility robustness
-    """
-    routes = _dc_routes(routes)
-    routes_norm = _normalize_ws_blocks(routes, evaluator)
-    base_obj, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
-    base_obj = float(base_obj)
-    if not math.isfinite(base_obj):
-        return routes_norm, False, base_obj
-
-    q_map = (diag.get("q", {}) if isinstance(diag, dict) else {}) or {}
-    pi = getattr(evaluator, "pi", {}) or {}
-    route_ids = [int(r) for r in evaluator.R if len(routes_norm.get(int(r), [])) >= 2]
-    if not route_ids:
-        return routes_norm, False, base_obj
-
-    span_eff = max(1, int(max_swap_span))
-    window_eff = max(0.0, float(idle_window_cap))
-    for _ in range(max(1, int(max_trials))):
-        r = int(rng.choice(route_ids))
-        seq = [int(x) for x in (routes_norm.get(int(r), []) or [])]
-        if len(seq) < 2:
-            continue
-
-        i = int(rng.randrange(0, len(seq) - 1))
-        j_hi = min(len(seq) - 1, int(i + span_eff))
-        if j_hi <= i:
-            continue
-        j = int(rng.randint(i + 1, j_hi))
-        a = int(seq[i])
-        b = int(seq[j])
-        if int(pi.get(a, -1)) == int(pi.get(b, -1)):
-            continue
-
-        qa = q_map.get(int(a), None)
-        qb = q_map.get(int(b), None)
-        if (qa is not None) and (qb is not None):
-            try:
-                if abs(float(qa) - float(qb)) > window_eff:
-                    continue
-            except Exception:
-                pass
-
-        cand_seq = list(seq)
-        cand_seq[i], cand_seq[j] = cand_seq[j], cand_seq[i]
-        cand_seq = _normalize_one_route_ws_blocks(cand_seq, evaluator)
-        if cand_seq == seq:
-            continue
-
-        cand_routes = _dc_routes(routes_norm)
-        cand_routes[int(r)] = cand_seq
-        cand_obj, _ = evaluator.evaluate(cand_routes, shelf_seq, place)
-        cand_obj = float(cand_obj)
-        if cand_obj < base_obj - 1e-9:
-            return cand_routes, True, cand_obj
-
-    return routes_norm, False, base_obj
-
-
 def intra_two_opt_once(
     *,
     routes: Dict[int, List[int]],
@@ -3806,157 +3274,6 @@ def intensify_critical_tail_once(
                     improved_any = True
 
     return best_routes, best_place, improved_any, float(best_obj)
-
-
-def rebalance_bottleneck_route_once(
-    *,
-    routes: Dict[int, List[int]],
-    place: Dict[int, int],
-    shelf_seq: Dict[int, List[int]],
-    evaluator: RobustEvaluator,
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]],
-    shelf_init_override: Optional[Dict[int, int]],
-    rng: random.Random,
-    tail_k: int = 6,
-    max_pos_samples: int = 6,
-    max_s_samples: int = 3,
-    max_evals: int = 12,
-) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
-    """
-    Large-scale escape/local-improvement:
-      - find bottleneck AGV route by q-tail
-      - relocate one tail task to another AGV using precheck + proxy funnel
-      - exact-evaluate only top candidates
-    """
-    routes = _dc_routes(routes)
-    place = _dc_place(place)
-    routes_norm = _normalize_ws_blocks(routes, evaluator)
-    base_obj, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
-    base_obj = float(base_obj)
-
-    R_ids = sorted(int(r) for r in evaluator.R)
-    if len(R_ids) < 2:
-        return routes, place, False, base_obj
-
-    q_map = (diag.get("q", {}) if isinstance(diag, dict) else {}) or {}
-    best_r = None
-    best_q = -1.0
-    for r in R_ids:
-        seq = [int(x) for x in (routes_norm.get(int(r), []) or [])]
-        if not seq:
-            continue
-        q_tail = max((float(q_map.get(int(j), 0.0)) for j in seq), default=0.0)
-        if q_tail > best_q:
-            best_q = float(q_tail)
-            best_r = int(r)
-    if best_r is None:
-        return routes, place, False, base_obj
-
-    seq_star = [int(x) for x in (routes_norm.get(int(best_r), []) or [])]
-    if not seq_star:
-        return routes, place, False, base_obj
-    tail = seq_star[-min(max(1, int(tail_k)), len(seq_star)) :]
-    if not tail:
-        return routes, place, False, base_obj
-
-    pre = build_rule_prechecker(
-        evaluator=evaluator,
-        shelf_seq=shelf_seq,
-        task_shelf_mapping=task_shelf_mapping,
-        shelf_init_override=shelf_init_override,
-    )
-    proxy = FastProxyEvaluatorLB(evaluator, pre)
-
-    cand_pool: List[Tuple[float, Dict[int, List[int]], Dict[int, int]]] = []
-    for j in reversed(tail):
-        j = int(j)
-        for r_to in R_ids:
-            r_to = int(r_to)
-            if r_to == int(best_r):
-                continue
-
-            seq_from = [int(x) for x in routes_norm[int(best_r)] if int(x) != int(j)]
-            seq_to = [int(x) for x in (routes_norm.get(int(r_to), []) or [])]
-            pos_all = _ws_block_boundary_positions(seq_to, evaluator.pi)
-            if len(pos_all) > int(max_pos_samples):
-                must = [0, len(seq_to)]
-                mid = [int(p) for p in pos_all if int(p) not in set(must)]
-                need = max(0, int(max_pos_samples) - len(must))
-                pick = rng.sample(mid, min(need, len(mid))) if (need > 0 and mid) else []
-                pos_all = sorted(set(must + pick))
-
-            s_cands = _cand_end_shelves_for_task(
-                int(j),
-                place=place,
-                S_near_by_j=S_near_by_j,
-                evaluator=evaluator,
-                shelf_seq=shelf_seq,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init_override=shelf_init_override,
-                must_include_prev_or_init=True,
-                max_keep=max(3, int(max_s_samples)),
-            )
-            s_cands = _augment_shelf_candidates(
-                int(j),
-                s_cands,
-                evaluator=evaluator,
-                rng=rng,
-                force_all_shelves=False,
-                extra_random_shelves=0,
-                cap_total=max(6, int(max_s_samples) + 2),
-            )
-            if not s_cands:
-                s_cands = [int(min(int(s) for s in evaluator.S))]
-            if len(s_cands) > int(max_s_samples):
-                s_cands = s_cands[: int(max_s_samples)]
-
-            used_tail = pre.build_used_tail_cells(place=place, ignore_tasks={int(j)})
-            for pos in pos_all:
-                pos = int(pos)
-                seq_to_new = list(seq_to)
-                seq_to_new.insert(pos, int(j))
-                seq_to_new = _normalize_one_route_ws_blocks(seq_to_new, evaluator)
-                for ss in s_cands:
-                    ss = int(ss)
-                    ok, _ = pre.check_insert_candidate(
-                        j=int(j),
-                        r=int(r_to),
-                        pos=int(pos),
-                        end_s=int(ss),
-                        routes=routes_norm,
-                        place=place,
-                        used_tail_cells=used_tail,
-                        strict_move1=False,
-                    )
-                    if not ok:
-                        continue
-                    cand_routes = _dc_routes(routes_norm)
-                    cand_routes[int(best_r)] = list(seq_from)
-                    cand_routes[int(r_to)] = list(seq_to_new)
-                    cand_place = _dc_place(place)
-                    cand_place[int(j)] = int(ss)
-                    lb = proxy.solution_lb(
-                        routes=cand_routes,
-                        place=cand_place,
-                        stop_at=base_obj if math.isfinite(base_obj) else None,
-                    )
-                    if math.isfinite(base_obj) and (lb >= base_obj - 1e-9):
-                        continue
-                    cand_pool.append((float(lb), cand_routes, cand_place))
-
-    if not cand_pool:
-        return routes_norm, place, False, base_obj
-    cand_pool.sort(key=lambda x: x[0])
-
-    k_eval = min(max(1, int(max_evals)), len(cand_pool))
-    for idx in range(k_eval):
-        _, rr, pp = cand_pool[idx]
-        obj, _ = evaluator.evaluate(rr, shelf_seq, pp)
-        obj = float(obj)
-        if obj < base_obj - 1e-9:
-            return rr, pp, True, obj
-    return routes_norm, place, False, base_obj
 
 
 # =========================
@@ -5189,375 +4506,12 @@ def repair_chain_violations_by_route_relink(
             cur.place[int(cur_j)] = int(cur.place[int(prev_j)])
 
     return best
-
-
-def _build_milp_warm_hint_from_solution(
-    *,
-    routes: Dict[int, List[int]],
-    shelf_seq: Dict[int, List[int]],
-    place: Dict[int, int],
-    evaluator: RobustEvaluator,
-) -> Dict[str, Any]:
-    j_set = set(int(x) for x in (getattr(evaluator, "J", set()) or set()))
-    s_set = set(int(x) for x in (getattr(evaluator, "S", {}).keys() or []))
-    j0 = _as_int_int_dict(getattr(evaluator, "J0", {}) or {})
-    jd = _as_int_int_dict(getattr(evaluator, "Jd", {}) or {})
-    j_i = _as_int_int_dict(getattr(evaluator, "J_I", {}) or {})
-
-    w_map: Dict[int, int] = {}
-    z_list: List[Tuple[int, int, int]] = []
-
-    for r_raw, seq_raw in (routes or {}).items():
-        try:
-            r = int(r_raw)
-        except Exception:
-            continue
-        seq = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-        if not seq:
-            continue
-
-        for j in seq:
-            w_map[int(j)] = int(r)
-
-        j0_r = j0.get(int(r), None)
-        jd_r = jd.get(int(r), None)
-        prev = int(j0_r) if j0_r is not None else None
-        for j in seq:
-            if prev is not None:
-                z_list.append((int(prev), int(j), int(r)))
-            prev = int(j)
-        if prev is not None and (jd_r is not None):
-            z_list.append((int(prev), int(jd_r), int(r)))
-
-    x_map: Dict[int, int] = {}
-    for j_raw, s_raw in (place or {}).items():
-        try:
-            j = int(j_raw)
-            s = int(s_raw)
-        except Exception:
-            continue
-        if (j in j_set) and (s in s_set):
-            x_map[int(j)] = int(s)
-
-    imm_list: List[Tuple[int, int, int]] = []
-    for c_raw, seq_raw in (shelf_seq or {}).items():
-        try:
-            c = int(c_raw)
-        except Exception:
-            continue
-        vt = j_i.get(int(c), None)
-        if vt is None:
-            continue
-        seq = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-        if not seq:
-            continue
-        imm_list.append((int(vt), int(seq[0]), int(c)))
-        for a, b in zip(seq[:-1], seq[1:]):
-            imm_list.append((int(a), int(b), int(c)))
-
-    return {
-        "w": w_map,
-        "z": z_list,
-        "x": x_map,
-        "immediate": imm_list,
-    }
-
-
-def _load_milp_bundle_solution(
-    bundle_path: str,
-    *,
-    evaluator: RobustEvaluator,
-) -> Optional[Tuple[Dict[int, List[int]], Dict[int, List[int]], Dict[int, int]]]:
-    if (not bundle_path) or (not os.path.exists(bundle_path)):
-        return None
-    try:
-        with open(bundle_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return None
-
-    j_set = set(int(x) for x in (getattr(evaluator, "J", set()) or set()))
-    s_set = set(int(x) for x in (getattr(evaluator, "S", {}).keys() or []))
-
-    routes_raw = data.get("routes", {}) if isinstance(data, dict) else {}
-    shelf_raw = data.get("shelf_seq", {}) if isinstance(data, dict) else {}
-    place_raw = data.get("place", {}) if isinstance(data, dict) else {}
-
-    if not isinstance(routes_raw, dict):
-        return None
-
-    routes: Dict[int, List[int]] = {}
-    for r_raw, seq_raw in routes_raw.items():
-        try:
-            r = int(r_raw)
-        except Exception:
-            continue
-        routes[int(r)] = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-
-    shelf_seq: Dict[int, List[int]] = {}
-    if isinstance(shelf_raw, dict):
-        for c_raw, seq_raw in shelf_raw.items():
-            try:
-                c = int(c_raw)
-            except Exception:
-                continue
-            shelf_seq[int(c)] = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-
-    place: Dict[int, int] = {}
-    if isinstance(place_raw, dict):
-        for j_raw, s_raw in place_raw.items():
-            try:
-                j = int(j_raw)
-                s = int(s_raw)
-            except Exception:
-                continue
-            if (j in j_set) and (s in s_set):
-                place[int(j)] = int(s)
-
-    return routes, shelf_seq, place
-
-
-def _try_milp_polish_endgame(
-    sol,
-    *,
-    evaluator: RobustEvaluator,
-    task_shelf_mapping: Optional[Dict[int, int]],
-    seed: int,
-    time_limit_sec: float,
-    lock_immediate: bool = True,
-) -> Tuple[Any, float, Tuple[int, int, int], bool, str]:
-    base_sol = copy.deepcopy(sol)
-    base_sol.routes = _dc_routes(getattr(base_sol, "routes", {}) or {})
-    base_sol.place = _dc_place(getattr(base_sol, "place", {}) or {})
-    base_sol.shelf_seq = _dc_shelf_seq(getattr(base_sol, "shelf_seq", {}) or {})
-
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-    base_sol.routes = _normalize_ws_blocks(base_sol.routes, evaluator)
-    base_sol.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        base_sol.shelf_seq,
-        evaluator=evaluator,
-        task_shelf_mapping=clean_map,
-    )
-    base_sol.routes = normalize_routes_by_shelf_seq_order(base_sol.routes, base_sol.shelf_seq, clean_map)
-
-    base_obj, base_det = _safe_evaluate(evaluator, base_sol.routes, base_sol.shelf_seq, base_sol.place)
-    base_obj = float(base_obj)
-    base_key = tuple(_safe_infeas_key(base_det, evaluator, obj=base_obj))
-
-    tl = float(time_limit_sec or 0.0)
-    if tl <= 0.0:
-        return base_sol, base_obj, base_key, False, "skip(time_limit<=0)"
-    if (not math.isfinite(base_obj)) or (base_key != (0, 0, 0)):
-        return base_sol, base_obj, base_key, False, "skip(base_not_feasible)"
-
-    required_attrs = [
-        "J",
-        "R",
-        "S",
-        "pi",
-        "D",
-        "J0",
-        "Jd",
-        "J_I",
-        "shelf_init",
-        "agv_init",
-        "d_s_pi",
-        "d_pi_s",
-        "d_s_s",
-        "ws_fixed_seq",
-    ]
-    missing_attrs = [nm for nm in required_attrs if not hasattr(evaluator, nm)]
-    if missing_attrs:
-        miss = ",".join(str(x) for x in missing_attrs[:6])
-        return base_sol, base_obj, base_key, False, f"skip(missing_eval_attrs:{miss})"
-
-    try:
-        import optimization_model
-        from gurobipy import GRB
-    except Exception as e:
-        return base_sol, base_obj, base_key, False, f"skip(milp_import:{type(e).__name__})"
-
-    j_set = set(int(x) for x in (getattr(evaluator, "J", set()) or set()))
-    if not j_set:
-        return base_sol, base_obj, base_key, False, "skip(empty_J)"
-
-    s_map_raw = getattr(evaluator, "S", {}) or {}
-    if not isinstance(s_map_raw, dict) or (not s_map_raw):
-        return base_sol, base_obj, base_key, False, "skip(empty_S)"
-    s_map = {int(s): v for s, v in s_map_raw.items()}
-
-    agv_init = _as_int_int_dict(getattr(evaluator, "agv_init", {}) or {})
-    r_raw = getattr(evaluator, "R", {}) or {}
-    if isinstance(r_raw, dict):
-        r_map = {int(r): r_raw[r] for r in r_raw.keys()}
-    else:
-        fallback_cell = next(iter(s_map.keys()))
-        r_ids = sorted(int(x) for x in (r_raw or []))
-        r_map = {int(r): int(agv_init.get(int(r), fallback_cell)) for r in r_ids}
-    if not r_map:
-        return base_sol, base_obj, base_key, False, "skip(empty_R)"
-
-    pi = _as_int_int_dict(getattr(evaluator, "pi", {}) or {})
-    if len(pi) < len(j_set):
-        return base_sol, base_obj, base_key, False, "skip(pi_incomplete)"
-    d_src = getattr(evaluator, "D", {}) or {}
-    d_map: Dict[int, float] = {}
-    for j in j_set:
-        try:
-            d_map[int(j)] = float(d_src[int(j)])
-        except Exception:
-            continue
-    if len(d_map) != len(j_set):
-        return base_sol, base_obj, base_key, False, "skip(D_incomplete)"
-
-    j0 = _as_int_int_dict(getattr(evaluator, "J0", {}) or {})
-    jd = _as_int_int_dict(getattr(evaluator, "Jd", {}) or {})
-    j_i = _as_int_int_dict(getattr(evaluator, "J_I", {}) or {})
-    shelf_data = _as_int_int_dict(getattr(evaluator, "shelf_init", {}) or {})
-    ws_fixed_seq = _dc_shelf_seq(getattr(evaluator, "ws_fixed_seq", {}) or {})
-    d_s_pi = {tuple(map(int, k)): float(v) for k, v in (getattr(evaluator, "d_s_pi", {}) or {}).items()}
-    d_pi_s = {tuple(map(int, k)): float(v) for k, v in (getattr(evaluator, "d_pi_s", {}) or {}).items()}
-    d_s_s = {tuple(map(int, k)): float(v) for k, v in (getattr(evaluator, "d_s_s", {}) or {}).items()}
-
-    if not j0 or not jd or not j_i or not shelf_data or not agv_init:
-        return base_sol, base_obj, base_key, False, "skip(core_maps_empty)"
-
-    task_shelf_map = _build_chain_of_map(base_sol.shelf_seq, clean_map)
-    task_shelf_map = {int(j): int(c) for j, c in task_shelf_map.items() if int(j) in j_set}
-    for c_raw, seq_raw in (base_sol.shelf_seq or {}).items():
-        try:
-            c = int(c_raw)
-        except Exception:
-            continue
-        for j in (seq_raw or []):
-            jj = int(j)
-            if jj in j_set and jj not in task_shelf_map:
-                task_shelf_map[int(jj)] = int(c)
-    if len(task_shelf_map) != len(j_set):
-        return base_sol, base_obj, base_key, False, "skip(task_shelf_map_incomplete)"
-
-    warm_hint = _build_milp_warm_hint_from_solution(
-        routes=base_sol.routes,
-        shelf_seq=base_sol.shelf_seq,
-        place=base_sol.place,
-        evaluator=evaluator,
-    )
-    warm_hint["cmax"] = float(base_obj)
-
-    shelf_ids = set(int(x) for x in shelf_data.keys())
-    used_shelves = set(int(c) for c in task_shelf_map.values())
-    unused_shelves = set(int(sid) for sid in shelf_ids if sid not in used_shelves)
-    shelf_virtual_tasks = {int(sid): int(j_i[int(sid)]) for sid in shelf_ids if int(sid) in j_i}
-    j_i_si: Dict[int, int] = {}
-    for c_raw, seq_raw in (base_sol.shelf_seq or {}).items():
-        try:
-            c = int(c_raw)
-        except Exception:
-            continue
-        seq = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-        if seq:
-            j_i_si[int(c)] = int(seq[0])
-
-    tasks = {int(j): (int(pi[int(j)]), float(d_map[int(j)]), None, None) for j in sorted(j_set)}
-    gamma_now = int(getattr(evaluator, "gamma", 0) or 0)
-    stamp = int(time.time() * 1000) % 1_000_000_000
-    file_prefix = f"alns_milp_polish_g{gamma_now}_s{int(seed)}_{stamp}"
-    bundle_path = os.path.join(
-        os.path.dirname(__file__),
-        "solution_exports",
-        f"{file_prefix}_bundle_gamma{gamma_now}.json",
-    )
-
-    lock_hint = {"immediate": True} if bool(lock_immediate) else None
-
-    try:
-        _, model, _, _ = optimization_model.optimize_warehouse(
-            R=r_map,
-            S=s_map,
-            K={},
-            tasks=tasks,
-            AGV_positions=dict(agv_init),
-            agv_positions_map={},
-            bj={},
-            hj={},
-            map_obj=None,
-            task_shelf_mapping=task_shelf_map,
-            J_I=j_i,
-            J_E=set(),
-            J=j_set,
-            J0=j0,
-            Jd=jd,
-            J_I_SI=j_i_si,
-            shelf_data=shelf_data,
-            agv_data=agv_init,
-            shelf_virtual_tasks=shelf_virtual_tasks,
-            unused_shelves=unused_shelves,
-            file_prefix=file_prefix,
-            gamma_budget=gamma_now,
-            ws_fixed_seq=ws_fixed_seq,
-            warm_start=None,
-            warm_hint=warm_hint,
-            lock_hint=lock_hint,
-            d_s_pi_in=d_s_pi,
-            d_pi_s_in=d_pi_s,
-            d_s_s_in=d_s_s,
-            time_limit=float(tl),
-            no_improve_limit=min(90.0, float(tl)),
-            bridge_quiet=True,
-        )
-    except Exception as e:
-        return base_sol, base_obj, base_key, False, f"error(milp_run:{type(e).__name__})"
-
-    sol_count = int(getattr(model, "SolCount", 0))
-    status = int(getattr(model, "Status", -1))
-    if sol_count <= 0:
-        return base_sol, base_obj, base_key, False, f"no_incumbent(status={status})"
-
-    loaded = _load_milp_bundle_solution(bundle_path, evaluator=evaluator)
-    if loaded is None:
-        return base_sol, base_obj, base_key, False, f"no_bundle(status={status})"
-
-    routes_c, shelf_seq_c, place_c = loaded
-    if not shelf_seq_c:
-        shelf_seq_c = _dc_shelf_seq(base_sol.shelf_seq)
-    for j in j_set:
-        if int(j) not in place_c and int(j) in base_sol.place:
-            place_c[int(j)] = int(base_sol.place[int(j)])
-
-    shelf_seq_c = _ensure_shelf_seq_covers_all_tasks(
-        shelf_seq_c,
-        evaluator=evaluator,
-        task_shelf_mapping=clean_map,
-    )
-    routes_c = _normalize_ws_blocks(routes_c, evaluator)
-    routes_c = normalize_routes_by_shelf_seq_order(routes_c, shelf_seq_c, clean_map)
-
-    cand_obj, cand_det = _safe_evaluate(evaluator, routes_c, shelf_seq_c, place_c)
-    cand_obj = float(cand_obj)
-    cand_key = tuple(_safe_infeas_key(cand_det, evaluator, obj=cand_obj))
-
-    improved = bool((cand_key < base_key) or (cand_key == base_key and cand_obj < base_obj - 1e-9))
-    if not improved:
-        obj_txt = f"{cand_obj:.2f}" if math.isfinite(cand_obj) else "inf"
-        base_txt = f"{base_obj:.2f}" if math.isfinite(base_obj) else "inf"
-        return base_sol, base_obj, base_key, False, f"no_gain(status={status}, obj={base_txt}->{obj_txt})"
-
-    out_sol = copy.deepcopy(base_sol)
-    out_sol.routes = _dc_routes(routes_c)
-    out_sol.shelf_seq = _dc_shelf_seq(shelf_seq_c)
-    out_sol.place = _dc_place(place_c)
-
-    stat_name = "OPTIMAL" if status == int(GRB.OPTIMAL) else ("TIME_LIMIT" if status == int(GRB.TIME_LIMIT) else str(status))
-    return out_sol, cand_obj, cand_key, True, f"improved({stat_name}: {base_obj:.2f}->{cand_obj:.2f})"
-
-
 # =========================
 #         ALNS main
 # =========================
 def alns_minimize(
     init,
     evaluator: RobustEvaluator,
-    evaluator_exact: Optional[RobustEvaluator] = None,
     iters: int = 400,
     start_T: float = 6.0,
     cool: float = 0.999,
@@ -5593,29 +4547,10 @@ def alns_minimize(
     eval_budget_total: Optional[int] = None,
     eval_budget_heavy: Optional[int] = None,
     target_feasible_obj: Optional[float] = None,
-    feasible_escape_prob: float = 0.04,
-    feasible_escape_relax: float = 2.00,
-    eval_layering: int = 0,
-    max_exact_evals_per_iter: int = 1,
-    use_eval_cache: int = 0,
-    eval_cache_maxsize: int = 50000,
-    use_shallow_copy: int = 0,
-    verbose: bool = False,
-    enable_ejection_chain: int = 1,
-    ejection_chain_prob: float = 0.12,
-    ejection_chain_min_seg: int = 6,
-    ejection_chain_max_seg: int = 15,
-    enable_ws_micro_reorder: int = 1,
-    ws_micro_reorder_prob: float = 0.16,
-    enable_milp_polish: int = 0,
-    milp_polish_time_limit_sec: float = 30.0,
-    milp_polish_lock_immediate: int = 1,
-    milp_polish_on_turbo: int = 0,
 ):
     assert S_near_by_j is not None, "????????????S_near_by_j ????????????????????????"
     rng = random.Random(seed)
-    verbose_eff = bool(verbose)
-    task_shelf_mapping = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=verbose_eff)
+    task_shelf_mapping = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=True)
     profile = str(speed_profile or "balanced").strip().lower()
     turbo_mode = profile in {"turbo", "fast", "speed"}
     if (not strong_init_time_budget_sec) or (float(strong_init_time_budget_sec) <= 0.0):
@@ -5631,110 +4566,20 @@ def alns_minimize(
             t_budget = None
     if t_budget is not None and t_budget <= 0.0:
         t_budget = None
-    use_eval_cache_eff = bool(int(use_eval_cache or 0) == 1)
-    use_shallow_copy_eff = bool(int(use_shallow_copy or 0) == 1)
-    eval_cache_maxsize_eff = max(1000, int(eval_cache_maxsize or 0))
-    enable_ejection_chain_eff = bool(int(enable_ejection_chain or 0) == 1)
-    ejection_chain_prob_eff = min(1.0, max(0.0, float(ejection_chain_prob or 0.0)))
-    ejection_chain_min_seg_eff = max(2, int(ejection_chain_min_seg or 2))
-    ejection_chain_max_seg_eff = max(ejection_chain_min_seg_eff, int(ejection_chain_max_seg or ejection_chain_min_seg_eff))
-    enable_ws_micro_reorder_eff = bool(int(enable_ws_micro_reorder or 0) == 1)
-    ws_micro_reorder_prob_eff = min(1.0, max(0.0, float(ws_micro_reorder_prob or 0.0)))
-    enable_milp_polish_eff = bool(int(enable_milp_polish or 0) == 1)
-    try:
-        milp_polish_time_limit_eff = max(0.0, float(milp_polish_time_limit_sec or 0.0))
-    except Exception:
-        milp_polish_time_limit_eff = 0.0
-    milp_polish_lock_immediate_eff = bool(int(milp_polish_lock_immediate or 0) == 1)
-    milp_polish_on_turbo_eff = bool(int(milp_polish_on_turbo or 0) == 1)
-
-    def _log(msg: str) -> None:
-        if verbose_eff:
-            print(msg)
 
     class _EvalCounterProxy:
-        def __init__(self, base, name: str):
+        def __init__(self, base):
             self._base = base
-            self.name = str(name or "eval")
             self.calls = 0
-            self.calls_by_tag: Dict[str, int] = defaultdict(int)
-            self._tag: str = "default"
 
         def evaluate(self, routes, shelf_seq, place, *args, **kwargs):
             self.calls += 1
-            tag = str(self._tag or "default")
-            self.calls_by_tag[tag] = int(self.calls_by_tag.get(tag, 0)) + 1
             return self._base.evaluate(routes, shelf_seq, place, *args, **kwargs)
-
-        def set_tag(self, tag: str) -> None:
-            self._tag = str(tag or "default")
 
         def __getattr__(self, name):
             return getattr(self._base, name)
 
-    eval_layering_eff = 1 if int(eval_layering or 0) == 1 else 0
-    max_exact_evals_per_iter_eff = max(0, int(max_exact_evals_per_iter or 0))
-    base_evaluator_fast = evaluator
-    base_evaluator_exact = evaluator_exact if evaluator_exact is not None else evaluator
-
-    evaluator_fast = _EvalCounterProxy(base_evaluator_fast, "fast")
-    evaluator_exact_proxy = _EvalCounterProxy(base_evaluator_exact, "exact")
-    layering_on = bool(eval_layering_eff == 1 and max_exact_evals_per_iter_eff > 0 and evaluator_exact is not None)
-    evaluator = evaluator_fast
-
-    def _clone_sol(sol_like):
-        if not use_shallow_copy_eff:
-            return copy.deepcopy(sol_like)
-        out = copy.copy(sol_like)
-        out.routes = _dc_routes(getattr(sol_like, "routes", {}))
-        out.place = _dc_place(getattr(sol_like, "place", {}))
-        out.shelf_seq = _dc_shelf_seq(getattr(sol_like, "shelf_seq", {}))
-        return out
-
-    cache_fast: OrderedDict = OrderedDict()
-    cache_exact: OrderedDict = OrderedDict()
-    cache_hits_fast = 0
-    cache_miss_fast = 0
-    cache_hits_exact = 0
-    cache_miss_exact = 0
-
-    def _serialize_solution(routes, shelf_seq, place):
-        key_routes = tuple(
-            (int(r), tuple(int(j) for j in (routes.get(r, []) or [])))
-            for r in sorted(routes.keys())
-        )
-        key_shelf = tuple(
-            (int(c), tuple(int(j) for j in (shelf_seq.get(c, []) or [])))
-            for c in sorted(shelf_seq.keys())
-        )
-        key_place = tuple((int(j), int(place[j])) for j in sorted(place.keys()))
-        return (key_routes, key_shelf, key_place)
-
-    def _cache_eval(layer: str, ev_proxy, routes, shelf_seq, place):
-        nonlocal cache_hits_fast, cache_miss_fast, cache_hits_exact, cache_miss_exact
-        if not use_eval_cache_eff:
-            return _safe_evaluate(ev_proxy, routes, shelf_seq, place)
-        key = _serialize_solution(routes, shelf_seq, place)
-        cache = cache_fast if str(layer) == "fast" else cache_exact
-        hit = cache.get(key, None)
-        if hit is not None:
-            cache.move_to_end(key, last=True)
-            if str(layer) == "fast":
-                cache_hits_fast += 1
-            else:
-                cache_hits_exact += 1
-            obj_h, det_h = hit
-            return float(obj_h), dict(det_h) if isinstance(det_h, dict) else {}
-        if str(layer) == "fast":
-            cache_miss_fast += 1
-        else:
-            cache_miss_exact += 1
-        obj_v, det_v = _safe_evaluate(ev_proxy, routes, shelf_seq, place)
-        cache[key] = (float(obj_v), dict(det_v) if isinstance(det_v, dict) else {})
-        cache.move_to_end(key, last=True)
-        while len(cache) > int(eval_cache_maxsize_eff):
-            cache.popitem(last=False)
-        return float(obj_v), dict(det_v) if isinstance(det_v, dict) else {}
+    evaluator = _EvalCounterProxy(evaluator)
 
     # =========================
     # ???????????????????????????????????????
@@ -5770,42 +4615,14 @@ def alns_minimize(
             max_agv_candidates = None
             max_pos_per_route = None
             max_place_try_each_base = 6
-    elif n_tasks <= 120:
-        if turbo_mode:
-            max_agv_candidates = 3
-            max_pos_per_route = 12
-            max_place_try_each_base = 5
-        else:
-            max_agv_candidates = 3
-            max_pos_per_route = 15
-            max_place_try_each_base = 5
-    elif n_tasks <= 260:
-        if turbo_mode:
-            max_agv_candidates = 2
-            max_pos_per_route = 8
-            max_place_try_each_base = 3
-        else:
-            max_agv_candidates = 3
-            max_pos_per_route = 10
-            max_place_try_each_base = 4
     else:
-        if turbo_mode:
-            max_agv_candidates = 2
-            max_pos_per_route = 6
-            max_place_try_each_base = 2
-        else:
-            max_agv_candidates = 2
-            max_pos_per_route = 8
-            max_place_try_each_base = 3
-    if n_tasks > 30 and max_agv_candidates is None:
         max_agv_candidates = 3
+        max_pos_per_route = 15
+        max_place_try_each_base = 5
     if n_s >= 300:
         max_place_try_each_base = min(max_place_try_each_base, 4)
 
-    large_scale_mode = bool(n_tasks >= 120)
-    very_large_mode = bool(n_tasks >= 260)
-
-    init_seed = _clone_sol(init)
+    init_seed = copy.deepcopy(init)
     if enable_strong_init:
         try:
             init_seed = _construct_strong_initial_solution(
@@ -5820,116 +4637,32 @@ def alns_minimize(
                 only_when_infeasible=True,
             )
         except Exception as e:
-            _log(f"[ALNS-init] strong constructor failed, fallback to raw init: {type(e).__name__}: {e}")
+            print(f"[ALNS-init] strong constructor failed, fallback to raw init: {type(e).__name__}: {e}")
 
-    best = _clone_sol(init_seed)
+    best = copy.deepcopy(init_seed)
     best.routes = _dc_routes(best.routes)
     best.place = _dc_place(best.place)
     best.shelf_seq = _dc_shelf_seq(best.shelf_seq)
 
     best.routes = _normalize_ws_blocks(best.routes, evaluator)
     best.routes = normalize_routes_by_shelf_seq_order(best.routes, best.shelf_seq, task_shelf_mapping)
-    evaluator.set_tag("init_eval")
-    best_obj, best_details = _cache_eval("fast", evaluator, best.routes, best.shelf_seq, best.place)
+    best_obj, best_details = _safe_evaluate(evaluator, best.routes, best.shelf_seq, best.place)
 
     best_obj = float(best_obj)
-    best_key = tuple(_safe_infeas_key(best_details, evaluator, obj=best_obj))
+    best_key = _safe_infeas_key(best_details, evaluator, obj=best_obj)
     key_feas = (0, 0, 0)
 
-    # Fallback only when initial solution is infeasible:
-    # try deterministic from-scratch seeds to avoid all-inf restarts.
-    if tuple(best_key) != key_feas:
-        fallback_pool: List[Tuple[str, object]] = []
-        try:
-            rr_seed = build_ws_round_robin_seed(
-                best,
-                evaluator=evaluator,
-                task_shelf_mapping=task_shelf_mapping,
-            )
-            fallback_pool.append(("ws_round_robin", rr_seed))
-        except Exception as e:
-            _log(f"[ALNS-init] ws_round_robin seed failed: {type(e).__name__}: {e}")
-        try:
-            safe_seed = build_safe_chain_ws_seed(
-                best,
-                evaluator_exact=base_evaluator_exact,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init=shelf_init,
-                seed=int(seed),
-                tries=(24 if n_tasks > 30 else 12),
-            )
-            fallback_pool.append(("safe_chain_ws", safe_seed))
-        except Exception as e:
-            _log(f"[ALNS-init] safe_chain_ws seed failed: {type(e).__name__}: {e}")
-
-        for seed_tag, seed_sol in fallback_pool:
-            cand = _clone_sol(seed_sol)
-            cand.routes = _dc_routes(cand.routes)
-            cand.place = _dc_place(cand.place)
-            cand.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-                _dc_shelf_seq(cand.shelf_seq),
-                evaluator=evaluator,
-                task_shelf_mapping=task_shelf_mapping,
-            )
-            cand.routes = _normalize_ws_blocks(cand.routes, evaluator)
-            cand.routes = normalize_routes_by_shelf_seq_order(cand.routes, cand.shelf_seq, task_shelf_mapping)
-
-            evaluator.set_tag(f"init_recover_{seed_tag}")
-            cand_obj, cand_details = _cache_eval("fast", evaluator, cand.routes, cand.shelf_seq, cand.place)
-            cand_obj = float(cand_obj)
-            cand_key = tuple(_safe_infeas_key(cand_details, evaluator, obj=cand_obj))
-
-            if (tuple(cand_key) < tuple(best_key)) or (
-                tuple(cand_key) == tuple(best_key) and (cand_obj < float(best_obj) - 1e-9)
-            ):
-                best = _clone_sol(cand)
-                best_obj = float(cand_obj)
-                best_details = dict(cand_details) if isinstance(cand_details, dict) else {}
-                best_key = tuple(cand_key)
-                _log(f"[ALNS-init] recovered better seed via {seed_tag}: key={best_key}, obj={best_obj:.2f}")
-            if tuple(best_key) == key_feas:
-                break
-
-    best_feasible = _clone_sol(best) if tuple(best_key) == key_feas else None
+    best_feasible = copy.deepcopy(best) if tuple(best_key) == key_feas else None
     best_feasible_obj = float(best_obj) if tuple(best_key) == key_feas else float("inf")
 
-    cur = _clone_sol(best)
+    cur = copy.deepcopy(best)
     cur_obj = float(best_obj)
     cur_details = dict(best_details) if isinstance(best_details, dict) else {}
     cur_key = tuple(best_key)
 
-    obj_scale = max(1.0, abs(float(best_obj)))
-    if very_large_mode:
-        t_scale = 0.0016
-        t_cap = 18.0 if turbo_mode else 24.0
-        cool_eff = max(float(cool), 0.9975 if turbo_mode else 0.9982)
-    elif large_scale_mode:
-        t_scale = 0.0014
-        t_cap = 14.0 if turbo_mode else 18.0
-        cool_eff = max(float(cool), 0.9972 if turbo_mode else 0.9978)
-    else:
-        t_scale = 0.0012
-        t_cap = 12.0
-        cool_eff = max(float(cool), 0.9960)
-    T = max(float(start_T), min(float(t_cap), float(obj_scale) * float(t_scale)))
+    T = float(start_T)
 
-    _log(
-        f"[ALNS-inner] init_obj = {best_obj:.2f} | init_infeas={best_key} "
-        f"| T0={float(T):.3f} | cool_eff={float(cool_eff):.6f} "
-        f"| layering={'on' if layering_on else 'off'}"
-    )
-
-    adaptive_reaction_eff = float(adaptive_reaction)
-    adaptive_segment_len_eff = max(8, int(adaptive_segment_len))
-    if very_large_mode:
-        adaptive_reaction_eff = max(adaptive_reaction_eff, 0.26 if turbo_mode else 0.24)
-        adaptive_segment_len_eff = min(adaptive_segment_len_eff, 24 if turbo_mode else 30)
-    elif large_scale_mode:
-        adaptive_reaction_eff = max(adaptive_reaction_eff, 0.22 if turbo_mode else 0.20)
-        adaptive_segment_len_eff = min(adaptive_segment_len_eff, 36 if turbo_mode else 42)
-    if int(iters) <= 320:
-        adaptive_segment_len_eff = min(adaptive_segment_len_eff, max(10, int(iters) // 8))
+    print(f"[ALNS-inner] init_obj = {best_obj:.2f} | init_infeas={best_key}")
 
     # =========================================================
     # ALNS Adaptive core: destroy/repair weights (the "A")
@@ -5937,8 +4670,6 @@ def alns_minimize(
     # destroy ?????????????????????????????????
     destroy_names = [
         "critical_single",
-        "critical_batch",
-        "dual_tail_critical",
         "rand_small",
         "shaw_related",
         "chain",
@@ -5951,8 +4682,6 @@ def alns_minimize(
     # ?????????????????????????????????????????????????????????
     init_destroy_w = {
         "critical_single": 1.25,
-        "critical_batch": 1.35 if large_scale_mode else 0.95,
-        "dual_tail_critical": 1.15 if very_large_mode else 0.90,
         "rand_small": 1.00,
         "shaw_related": 0.90,
         "chain": 0.70,
@@ -5965,26 +4694,26 @@ def alns_minimize(
     destroy_pool = AdaptiveOpPool(
         destroy_names,
         init_destroy_w,
-        reaction=adaptive_reaction_eff,
-        segment_len=adaptive_segment_len_eff,
+        reaction=adaptive_reaction,
+        segment_len=adaptive_segment_len,
         w_min=adaptive_w_min,
         w_max=adaptive_w_max,
     )
 
     # repair ??????????????????????????????????????? repair ??????????????????
-    repair_names = ["repair_unordered", "repair_ordered", "repair_difficult"]
-    init_repair_w = {"repair_unordered": 1.0, "repair_ordered": 1.0, "repair_difficult": 0.95}
+    repair_names = ["repair_unordered", "repair_ordered"]
+    init_repair_w = {"repair_unordered": 1.0, "repair_ordered": 1.0}
     repair_pool = AdaptiveOpPool(
         repair_names,
         init_repair_w,
-        reaction=adaptive_reaction_eff,
-        segment_len=adaptive_segment_len_eff,
+        reaction=adaptive_reaction,
+        segment_len=adaptive_segment_len,
         w_min=adaptive_w_min,
         w_max=adaptive_w_max,
     )
 
     # ?????? destroy ???????????? removed_order ????????????seed-first / gap-first???
-    ordered_required = {"critical_batch", "dual_tail_critical", "ws_gap_bundle", "ws_idle_gap", "ws_critical", "robust_sensitive"}
+    ordered_required = {"ws_gap_bundle", "ws_idle_gap", "ws_critical", "robust_sensitive"}
 
     # reward ???????????????ALNS???
     SCORE_BEST = float(reward_best)
@@ -5996,7 +4725,6 @@ def alns_minimize(
     PAIR_EPS = 0.08
     PAIR_DECAY = 0.995
     pair_quality: Dict[Tuple[str, str], float] = defaultdict(float)
-    long_run_mode = bool(int(iters) >= 2000)
 
     # destroy?????????????????????????????????
     P_DESTROY_RANDOM_SMALL = 0.40
@@ -6004,46 +4732,19 @@ def alns_minimize(
     P_DESTROY_CHAIN = 0.25
 
     # ??????????????????????????????
-    if very_large_mode:
-        if long_run_mode:
-            # Borrow the older "260222" aggressive idea for long runs on huge instances.
-            P_USE_CROSS_VEHICLE = 0.30
-            P_USE_CROSS_BLOCK = 0.12
-            P_USE_INTRA_2OPT = 0.20
-            P_USE_INTRA_OROPT = 0.18
-        else:
-            P_USE_CROSS_VEHICLE = 0.16
-            P_USE_CROSS_BLOCK = 0.05
-            P_USE_INTRA_2OPT = 0.08
-            P_USE_INTRA_OROPT = 0.08
-    elif large_scale_mode:
-        P_USE_CROSS_VEHICLE = 0.28
-        P_USE_CROSS_BLOCK = 0.12
-        P_USE_INTRA_2OPT = 0.16
-        P_USE_INTRA_OROPT = 0.14
-    else:
-        P_USE_CROSS_VEHICLE = 0.45
-        P_USE_CROSS_BLOCK = 0.25
-        P_USE_INTRA_2OPT = 0.30
-        P_USE_INTRA_OROPT = 0.25
+    P_USE_CROSS_VEHICLE = 0.45
+    P_USE_CROSS_BLOCK = 0.25
+    P_USE_INTRA_2OPT = 0.30
+    P_USE_INTRA_OROPT = 0.25
 
     # ??????????????????????????????
-    if very_large_mode:
-        STAG_WS = 44 if long_run_mode else 55
-        STAG_LIMIT = 120
-    elif large_scale_mode:
-        STAG_WS = 48
-        STAG_LIMIT = 150
-    else:
-        STAG_WS = 40
-        STAG_LIMIT = 120
+    STAG_WS = 40
+    STAG_LIMIT = 120
     P_WS_FOCUSED = 0.70
-    FEAS_ESCAPE_PROB = max(0.0, min(0.25, float(feasible_escape_prob)))
-    FEAS_ESCAPE_RELAX = max(0.0, float(feasible_escape_relax))
 
     # ????????????????????????
-    REHEAT_SOFT = max(2.50, 0.45 * float(T))
-    REHEAT_STRONG = max(6.00, 0.95 * float(T))
+    REHEAT_SOFT = 2.50
+    REHEAT_STRONG = 6.00
 
     POST_SHAKE_ITERS = 25
     post_shake = 0
@@ -6058,93 +4759,40 @@ def alns_minimize(
     ws_pos_global = ws_order_idx if ws_order_idx is not None else _ws_index(getattr(evaluator, "ws_fixed_seq", {}) or {})
     pi = getattr(evaluator, "pi", {}) or {}
 
-    elite_pool: List[Tuple[float, Any]] = []
-
-    def _push_elite(sol_obj: float, sol_like: Any) -> None:
-        if not math.isfinite(float(sol_obj)):
-            return
-        obj_v = float(sol_obj)
-        for ex_obj, _ in elite_pool:
-            if abs(float(ex_obj) - obj_v) <= 1e-9:
-                return
-        elite_pool.append((obj_v, _clone_sol(sol_like)))
-        elite_pool.sort(key=lambda x: float(x[0]))
-        if len(elite_pool) > 4:
-            del elite_pool[4:]
-
-    if best_feasible is not None and math.isfinite(float(best_feasible_obj)):
-        _push_elite(float(best_feasible_obj), best_feasible)
-
     effective_iters = max(1, int(iters))
-    iters_since_best = 0
-    if very_large_mode:
-        uphill_rel_cap = 0.25 if (not turbo_mode) else 0.18
-        if effective_iters >= 450:
-            early_stop_patience = max(200, int(0.40 * float(effective_iters)))
-            early_stop_warmup = max(150, int(0.32 * float(effective_iters)))
-        elif effective_iters >= 260:
-            early_stop_patience = max(150, int(0.40 * float(effective_iters)))
-            early_stop_warmup = max(100, int(0.30 * float(effective_iters)))
-        else:
-            early_stop_patience = max(100, int(0.30 * float(effective_iters)))
-            early_stop_warmup = max(70, int(0.26 * float(effective_iters)))
-    elif large_scale_mode:
-        uphill_rel_cap = 0.35 if (not turbo_mode) else 0.25
-        early_stop_patience = max(120, int(0.30 * float(effective_iters)))
-        early_stop_warmup = max(80, int(0.28 * float(effective_iters)))
-    else:
-        uphill_rel_cap = 0.45 if (not turbo_mode) else 0.35
-        early_stop_patience = max(90, int(0.26 * float(effective_iters)))
-        early_stop_warmup = max(70, int(0.28 * float(effective_iters)))
 
     effective_relabel_interval = int(relabel_interval)
     if turbo_mode:
         effective_relabel_interval = 0
-    elif very_large_mode:
-        effective_relabel_interval = max(0, int(effective_relabel_interval))
-        if effective_relabel_interval > 0:
-            effective_relabel_interval = max(60, effective_relabel_interval)
-    elif large_scale_mode and effective_relabel_interval > 0:
-        effective_relabel_interval = max(35, effective_relabel_interval)
 
     effective_relabel_top_k = int(relabel_eval_top_k)
     if turbo_mode:
         effective_relabel_top_k = min(effective_relabel_top_k, 4)
-    elif very_large_mode:
-        effective_relabel_top_k = min(effective_relabel_top_k, 3)
     elif n_tasks >= 30:
         effective_relabel_top_k = min(effective_relabel_top_k, 8)
 
     if (target_feasible_obj_eff is not None) and (best_feasible is not None) and (float(best_feasible_obj) <= float(target_feasible_obj_eff) + 1e-9):
-        _log(
+        print(
             f"[ALNS-inner] init already reaches target feasible obj <= {float(target_feasible_obj_eff):.2f}; skip iterations."
         )
         effective_iters = 0
 
-    no_improve_early_stop_on = True
-    if very_large_mode and int(getattr(evaluator, "gamma", 0)) == 0 and int(effective_iters) <= 1500:
-        # Gamma=0 short/medium runs are often warm-started near-feasible; avoid stopping too early.
-        no_improve_early_stop_on = False
-
-    calls_last_report = int(getattr(evaluator, "calls", 0))
-    exact_calls_last_report = int(getattr(evaluator_exact_proxy, "calls", 0))
     for it in range(effective_iters):
         if (target_feasible_obj_eff is not None) and (best_feasible is not None) and (float(best_feasible_obj) <= float(target_feasible_obj_eff) + 1e-9):
-            _log(
+            print(
                 f"[ALNS-inner] stop by target feasible obj: {float(best_feasible_obj):.2f} <= {float(target_feasible_obj_eff):.2f} at iter {it}/{effective_iters}"
             )
             break
         if int(getattr(evaluator, "calls", 0)) >= int(eval_budget_total_eff):
-            _log(
+            print(
                 f"[ALNS-inner] stop by eval budget: {int(eval_budget_total_eff)} calls "
                 f"at iter {it}/{effective_iters}"
             )
             break
         if (t_budget is not None) and ((time.perf_counter() - t_start) >= t_budget):
-            _log(f"[ALNS-inner] stop by time budget: {t_budget:.2f}s at iter {it}/{effective_iters}")
+            print(f"[ALNS-inner] stop by time budget: {t_budget:.2f}s at iter {it}/{effective_iters}")
             break
         improved_best_this_iter = False
-        exact_evals_this_iter = 0
 
         # ??????????????????stall ?????????post_shake ????????????????????????
         stagnating = (stall >= STAG_WS)
@@ -6157,40 +4805,17 @@ def alns_minimize(
         if strong_shake:
             T = max(T, REHEAT_STRONG)
 
-        forced_diversify = bool(
-            very_large_mode and (stall >= max(28, STAG_WS - 8)) and ((it % 24) == 0)
-        )
-
         if strong_shake:
             if feasible_first and (best_feasible is not None):
-                cur = _clone_sol(best_feasible)
+                cur = copy.deepcopy(best_feasible)
                 cur_obj = float(best_feasible_obj)
                 cur_details = {}
                 cur_key = key_feas
             else:
-                cur = _clone_sol(best)
+                cur = copy.deepcopy(best)
                 cur_obj = float(best_obj)
                 cur_details = dict(best_details) if isinstance(best_details, dict) else {}
                 cur_key = tuple(best_key)
-
-        if (
-            large_scale_mode
-            and (not strong_shake)
-            and (stall >= STAG_WS)
-            and (len(elite_pool) >= 2)
-            and ((it % (36 if very_large_mode else 24)) == 0)
-        ):
-            pick_hi = min(len(elite_pool) - 1, 2)
-            pick_idx = 1 if pick_hi >= 1 else 0
-            if pick_hi > 1:
-                pick_idx = int(rng.randint(1, pick_hi))
-            elite_obj, elite_sol = elite_pool[pick_idx]
-            cur = _clone_sol(elite_sol)
-            cur_obj = float(elite_obj)
-            cur_details = {}
-            cur_key = key_feas
-            T = max(float(T), REHEAT_STRONG)
-            post_shake = max(int(post_shake), 12 if very_large_mode else 8)
 
         cur_feasible = (tuple(cur_key) == key_feas)
         fast_feasible_mode = bool(cur_feasible and (not strong_shake) and (not stagnating) and (not post_mode))
@@ -6216,64 +4841,20 @@ def alns_minimize(
 
         # ===== ?????????????????? stall ????????????post_mode ?????????????????????????????????=====
         if strong_shake:
-            if very_large_mode:
-                repair_evals_per_task = 10 if turbo_mode else 8
-                repair_evals_total = 60 if turbo_mode else 48
-            elif large_scale_mode:
-                repair_evals_per_task = 18 if turbo_mode else 14
-                repair_evals_total = 110 if turbo_mode else 90
-            else:
-                repair_evals_per_task = 40 if turbo_mode else 35
-                repair_evals_total = 220 if turbo_mode else 190
+            repair_evals_per_task = 40 if turbo_mode else 35
+            repair_evals_total = 220 if turbo_mode else 190
         elif stagnating:
-            if very_large_mode:
-                repair_evals_per_task = 8 if turbo_mode else 6
-                repair_evals_total = 42 if turbo_mode else 32
-            elif large_scale_mode:
-                repair_evals_per_task = 14 if turbo_mode else 11
-                repair_evals_total = 90 if turbo_mode else 72
-            else:
-                repair_evals_per_task = 30 if turbo_mode else 24
-                repair_evals_total = 150 if turbo_mode else 130
+            repair_evals_per_task = 30 if turbo_mode else 24
+            repair_evals_total = 150 if turbo_mode else 130
         elif post_mode:
-            if very_large_mode:
-                repair_evals_per_task = 6 if turbo_mode else 5
-                repair_evals_total = 26 if turbo_mode else 22
-            elif large_scale_mode:
-                repair_evals_per_task = 10 if turbo_mode else 8
-                repair_evals_total = 62 if turbo_mode else 52
-            else:
-                repair_evals_per_task = 20 if turbo_mode else 16
-                repair_evals_total = 100 if turbo_mode else 90
+            repair_evals_per_task = 20 if turbo_mode else 16
+            repair_evals_total = 100 if turbo_mode else 90
         elif fast_feasible_mode:
-            if very_large_mode:
-                repair_evals_per_task = 2 if turbo_mode else 1
-                repair_evals_total = 8 if turbo_mode else 6
-            elif large_scale_mode:
-                repair_evals_per_task = 3 if turbo_mode else 2
-                repair_evals_total = 14 if turbo_mode else 10
-            else:
-                repair_evals_per_task = 5 if turbo_mode else 4
-                repair_evals_total = 24 if turbo_mode else 20
+            repair_evals_per_task = 5 if turbo_mode else 4
+            repair_evals_total = 24 if turbo_mode else 20
         else:
-            if very_large_mode:
-                repair_evals_per_task = 4 if turbo_mode else 3
-                repair_evals_total = 20 if turbo_mode else 16
-            elif large_scale_mode:
-                repair_evals_per_task = 8 if turbo_mode else 6
-                repair_evals_total = 50 if turbo_mode else 36
-            else:
-                repair_evals_per_task = 14 if turbo_mode else 10
-                repair_evals_total = 80 if turbo_mode else 55
-
-        if very_large_mode and long_run_mode:
-            # In long runs, keep repair search a bit deeper to avoid early-quality plateau.
-            if fast_feasible_mode:
-                repair_evals_per_task = max(repair_evals_per_task, 3 if turbo_mode else 2)
-                repair_evals_total = max(repair_evals_total, 14 if turbo_mode else 10)
-            elif stagnating:
-                repair_evals_per_task = max(repair_evals_per_task, 9 if turbo_mode else 7)
-                repair_evals_total = max(repair_evals_total, 54 if turbo_mode else 40)
+            repair_evals_per_task = 14 if turbo_mode else 10
+            repair_evals_total = 80 if turbo_mode else 55
 
         # =====================================================
         # -------------- 1) destroy + repair --------------
@@ -6296,82 +4877,21 @@ def alns_minimize(
         # ========== ????????? destroy+repair ????????? ==========
         def _adaptive_destroy_repair() -> Tuple[Dict[int, List[int]], Dict[int, int], str, str]:
             nonlocal stagnating, strong_shake, post_mode
-            near_stall = bool(very_large_mode and (stall >= max(14, STAG_WS // 3)))
-
-            def _destroy_frac(kind: str) -> Tuple[float, float]:
-                k = str(kind or "small")
-                if very_large_mode:
-                    if k == "big":
-                        if strong_shake:
-                            return (0.10, 0.22)
-                        if stagnating:
-                            return (0.07, 0.16)
-                        if near_stall:
-                            return (0.05, 0.11)
-                        return (0.03, 0.08)
-                    if strong_shake:
-                        return (0.03, 0.07)
-                    if stagnating:
-                        return (0.024, 0.055)
-                    if near_stall:
-                        return (0.018, 0.040)
-                    return (0.012, 0.030) if fast_feasible_mode else (0.02, 0.05)
-                if large_scale_mode:
-                    if k == "big":
-                        return (0.09, 0.20) if (stagnating or strong_shake) else (0.07, 0.16)
-                    return (0.03, 0.10) if fast_feasible_mode else (0.05, 0.13)
-                if k == "big":
-                    return (0.35, 0.65)
-                return (0.15, 0.35)
 
             # --------- 1) ???destroy ???????????????????????????---------
             cand_destroy: List[str] = []
-            if forced_diversify:
-                cand_destroy = ["critical_batch", "rand_big", "ws_gap_bundle", "chain"]
-                if very_large_mode:
-                    cand_destroy.append("dual_tail_critical")
-                if enable_robust_destroy and int(getattr(evaluator, "gamma", 0)) > 0:
-                    cand_destroy.append("robust_sensitive")
-            elif strong_shake:
-                if very_large_mode:
-                    cand_destroy = ["critical_batch", "critical_single", "dual_tail_critical", "ws_critical", "rand_small", "rand_big", "chain"]
-                elif large_scale_mode:
-                    cand_destroy = ["critical_batch", "critical_single", "ws_critical", "ws_gap_bundle", "rand_small", "chain"]
-                else:
-                    cand_destroy = ["ws_gap_bundle", "ws_idle_gap", "rand_big"]
+            if strong_shake:
+                cand_destroy = ["ws_gap_bundle", "ws_idle_gap", "rand_big"]
             elif fast_feasible_mode:
-                if very_large_mode:
-                    cand_destroy = ["critical_batch", "critical_single", "dual_tail_critical", "ws_critical", "rand_small"]
-                    if near_stall or ((it % 14) == 0):
-                        cand_destroy.append("ws_gap_bundle")
-                    if near_stall or ((it % 16) == 0):
-                        cand_destroy.append("rand_big")
-                    if near_stall and ((it % 10) == 0):
-                        cand_destroy.append("chain")
-                else:
-                    cand_destroy = ["critical_single", "ws_critical"]
-                if (not very_large_mode) and ((it % 18) == 0):
-                    cand_destroy.append("ws_gap_bundle")
-                if (not very_large_mode) and ((it % 12) == 0):
-                    cand_destroy.append("rand_small")
+                cand_destroy = ["critical_single", "ws_critical", "rand_small", "ws_gap_bundle"]
                 if enable_robust_destroy and int(getattr(evaluator, "gamma", 0)) > 0:
                     cand_destroy.append("robust_sensitive")
             elif stagnating:
-                if very_large_mode:
-                    cand_destroy = ["critical_batch", "critical_single", "dual_tail_critical", "ws_critical", "rand_small", "rand_big", "chain"]
-                elif large_scale_mode:
-                    cand_destroy = ["critical_batch", "critical_single", "ws_gap_bundle", "ws_critical", "rand_small", "chain", "shaw_related"]
-                else:
-                    cand_destroy = ["critical_single", "ws_gap_bundle", "ws_idle_gap", "ws_critical", "rand_small", "shaw_related", "chain"]
+                cand_destroy = ["critical_single", "ws_gap_bundle", "ws_idle_gap", "ws_critical", "rand_small", "shaw_related", "chain"]
                 if enable_robust_destroy and int(getattr(evaluator, "gamma", 0)) > 0:
                     cand_destroy.append("robust_sensitive")
             elif post_mode:
-                if very_large_mode:
-                    cand_destroy = ["critical_batch", "critical_single", "dual_tail_critical", "ws_critical", "rand_small", "rand_big", "chain"]
-                elif large_scale_mode:
-                    cand_destroy = ["critical_batch", "critical_single", "ws_gap_bundle", "ws_critical", "rand_small", "shaw_related", "chain"]
-                else:
-                    cand_destroy = ["critical_single", "ws_gap_bundle", "ws_critical", "rand_small", "shaw_related", "chain"]
+                cand_destroy = ["critical_single", "ws_gap_bundle", "ws_critical", "rand_small", "shaw_related", "chain"]
                 if enable_robust_destroy and int(getattr(evaluator, "gamma", 0)) > 0:
                     cand_destroy.append("robust_sensitive")
             else:
@@ -6379,25 +4899,11 @@ def alns_minimize(
                 if enable_robust_destroy and int(getattr(evaluator, "gamma", 0)) > 0:
                     cand_destroy.append("robust_sensitive")
 
-            if strong_shake:
-                eps_destroy = 0.22 if very_large_mode else 0.16
-            elif stagnating:
-                eps_destroy = 0.14 if very_large_mode else 0.10
-            elif near_stall:
-                eps_destroy = 0.08
-            elif fast_feasible_mode and very_large_mode:
-                eps_destroy = 0.05
-            else:
-                eps_destroy = 0.03
-            if cand_destroy and (rng.random() < float(eps_destroy)):
-                dname = str(rng.choice(cand_destroy))
-            else:
-                dname = destroy_pool.pick(rng, cand_destroy)
+            dname = destroy_pool.pick(rng, cand_destroy)
 
             # --------- 2) ?????? destroy ---------
             if dname == "rand_small":
-                lo, hi = _destroy_frac("small")
-                remove_frac = rng.uniform(lo, hi)
+                remove_frac = rng.uniform(0.15, 0.35)
                 removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed)
 
@@ -6411,42 +4917,8 @@ def alns_minimize(
                     extra_neighbor_prob=(0.15 if turbo_mode else 0.25),
                 )
 
-            elif dname == "critical_batch":
-                q_hint = cur_details.get("q", {}) if isinstance(cur_details, dict) else {}
-                if very_large_mode:
-                    k_min, k_max = 2, 4
-                elif large_scale_mode:
-                    k_min, k_max = 3, 5
-                else:
-                    k_min, k_max = 3, 6
-                removed_order, removed, routes_half = destroy_critical_batch(
-                    routes=cur.routes,
-                    evaluator=evaluator,
-                    rng=rng,
-                    q_hint=q_hint if isinstance(q_hint, dict) else None,
-                    min_k=int(k_min),
-                    max_k=int(k_max),
-                )
-
-            elif dname == "dual_tail_critical":
-                q_hint = cur_details.get("q", {}) if isinstance(cur_details, dict) else {}
-                removed_order, removed, routes_half = destroy_dual_tail_critical(
-                    routes=cur.routes,
-                    evaluator=evaluator,
-                    rng=rng,
-                    q_hint=q_hint if isinstance(q_hint, dict) else None,
-                    tail_window=(10 if very_large_mode else 12),
-                    max_per_route=(2 if very_large_mode else 1),
-                )
-                if not removed_order:
-                    lo, hi = _destroy_frac("small")
-                    remove_frac = rng.uniform(lo, hi)
-                    removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
-                    removed_order = _order_from_set(removed)
-
             elif dname == "rand_big":
-                lo, hi = _destroy_frac("big")
-                remove_frac = rng.uniform(lo, hi)
+                remove_frac = rng.uniform(0.35, 0.65)
                 removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed)
 
@@ -6501,8 +4973,7 @@ def alns_minimize(
                 )
                 if not removed_order:
                     # ???????????????????????????
-                    lo, hi = _destroy_frac("small")
-                    remove_frac = rng.uniform(lo, hi)
+                    remove_frac = rng.uniform(0.15, 0.35)
                     removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                     removed_order = _order_from_set(removed)
 
@@ -6524,8 +4995,7 @@ def alns_minimize(
 
             else:
                 # ???????????????name
-                lo, hi = _destroy_frac("small")
-                remove_frac = rng.uniform(lo, hi)
+                remove_frac = rng.uniform(0.15, 0.35)
                 removed, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed)
 
@@ -6543,77 +5013,31 @@ def alns_minimize(
                         removed_set.add(int(x))
             if not removed_set:
                 # ????????????
-                lo, hi = _destroy_frac("small")
-                remove_frac = rng.uniform(lo, hi)
+                remove_frac = rng.uniform(0.15, 0.35)
                 removed_set, routes_half = destroy_random(cur.routes, remove_frac, rng)
                 removed_order = _order_from_set(removed_set)
                 removed_set = set(int(x) for x in removed_order)
 
             # --------- 3) ???repair?????????destroy ?????? ordered???--------
             if dname in ordered_required:
-                cand_repair = ["repair_ordered", "repair_difficult"]
+                cand_repair = ["repair_ordered"]
             else:
-                cand_repair = ["repair_unordered", "repair_ordered", "repair_difficult"]
+                cand_repair = ["repair_unordered", "repair_ordered"]
 
             repair_eval_pt = int(repair_evals_per_task)
             repair_eval_total = int(repair_evals_total)
             place_try_each_eff = int(max_place_try_each_base)
             extra_shelves_eff = int(extra_shelves)
-            if very_large_mode:
-                preselect_m_eff = 4
-                preselect_per_pos_eff = 1
-            elif large_scale_mode:
-                preselect_m_eff = 6
-                preselect_per_pos_eff = 1
-            elif fast_feasible_mode:
-                preselect_m_eff = 8
-                preselect_per_pos_eff = 1
-            else:
-                preselect_m_eff = 12
-                preselect_per_pos_eff = 2
-            repair_require_finite = bool(feasible_first and cur_feasible and (not very_large_mode))
-            repair_strict = bool(repair_require_finite and (not large_scale_mode) and (not stagnating))
-            repair_strict_bruteforce = bool(repair_require_finite and (not large_scale_mode))
-            if dname == "critical_batch":
-                repair_eval_pt = max(repair_eval_pt, 3 if very_large_mode else 4)
-                repair_eval_total = max(repair_eval_total, 18 if very_large_mode else 28)
-                preselect_m_eff = max(preselect_m_eff, 6 if very_large_mode else 8)
-                preselect_per_pos_eff = max(preselect_per_pos_eff, 1)
-            if dname == "dual_tail_critical":
-                repair_eval_pt = min(repair_eval_pt, 2 if very_large_mode else repair_eval_pt)
-                repair_eval_total = min(repair_eval_total, 12 if very_large_mode else repair_eval_total)
-                place_try_each_eff = min(place_try_each_eff, 3)
-                extra_shelves_eff = min(extra_shelves_eff, 1)
             if fast_feasible_mode and (dname == "critical_single"):
                 repair_eval_pt = min(repair_eval_pt, 3 if turbo_mode else 2)
                 repair_eval_total = min(repair_eval_total, 10 if turbo_mode else 8)
                 place_try_each_eff = min(place_try_each_eff, 3)
                 extra_shelves_eff = 0
-                preselect_m_eff = min(preselect_m_eff, 4)
-            if forced_diversify:
-                repair_eval_pt = max(repair_eval_pt, 4 if very_large_mode else 5)
-                repair_eval_total = max(repair_eval_total, 22 if very_large_mode else 36)
-            if very_large_mode and near_stall and fast_feasible_mode:
-                repair_eval_pt = max(repair_eval_pt, 3 if turbo_mode else 2)
-                repair_eval_total = max(repair_eval_total, 14 if turbo_mode else 10)
-                preselect_m_eff = max(preselect_m_eff, 5)
 
             # lightweight pair credit: bias repair roulette by (destroy,repair) historical quality
             cand_r = [c for c in cand_repair if c in repair_pool.w]
             use_pair_credit = bool(stagnating or post_mode or strong_shake)
-            if strong_shake:
-                eps_repair = 0.16 if very_large_mode else 0.10
-            elif stagnating:
-                eps_repair = 0.10 if very_large_mode else 0.07
-            elif near_stall:
-                eps_repair = 0.05
-            else:
-                eps_repair = 0.02
-            if not cand_r:
-                rname = repair_pool.pick(rng, cand_repair)
-            elif rng.random() < float(eps_repair):
-                rname = str(rng.choice(cand_r))
-            elif not use_pair_credit:
+            if (not cand_r) or (not use_pair_credit):
                 rname = repair_pool.pick(rng, cand_repair)
             elif rng.random() < PAIR_EPS:
                 rname = str(rng.choice(cand_r))
@@ -6637,7 +5061,6 @@ def alns_minimize(
                         break
 
             # --------- 4) ?????? repair ---------
-            evaluator.set_tag("repair")
             if rname == "repair_ordered":
                 routes_new_, place_new_ = repair_greedy_insert_with_place_ordered(
                     routes=routes_half,
@@ -6657,38 +5080,6 @@ def alns_minimize(
                     max_pos_per_route=max_pos_per_route,
                     max_evals_per_task=repair_eval_pt,
                     max_evals_total=repair_eval_total,
-                    preselect_m=preselect_m_eff,
-                    preselect_per_pos_shelves=preselect_per_pos_eff,
-                    strict_construct=repair_strict,
-                    strict_bruteforce_fallback=repair_strict_bruteforce,
-                    require_finite_eval=repair_require_finite,
-                    eval_fail_cost=1e30,
-                )
-            elif rname == "repair_difficult":
-                routes_new_, place_new_ = repair_greedy_insert_with_place_difficult_ordered(
-                    routes=routes_half,
-                    shelf_seq=cur.shelf_seq,
-                    place=cur.place,
-                    evaluator=evaluator,
-                    removed=set(int(x) for x in removed_set),
-                    rng=rng,
-                    S_near_by_j=S_near_by_j,
-                    task_shelf_mapping=task_shelf_mapping,
-                    shelf_init_override=shelf_init,
-                    max_place_try_each=place_try_each_eff,
-                    top_k_random=topk_insert,
-                    extra_random_shelves=extra_shelves_eff,
-                    force_all_shelves=force_all_shelves,
-                    max_agv_candidates=max_agv_candidates,
-                    max_pos_per_route=max_pos_per_route,
-                    max_evals_per_task=repair_eval_pt,
-                    max_evals_total=repair_eval_total,
-                    preselect_m=preselect_m_eff,
-                    preselect_per_pos_shelves=preselect_per_pos_eff,
-                    strict_construct=repair_strict,
-                    strict_bruteforce_fallback=repair_strict_bruteforce,
-                    require_finite_eval=repair_require_finite,
-                    eval_fail_cost=1e30,
                 )
             else:
                 routes_new_, place_new_ = repair_greedy_insert_with_place(
@@ -6709,18 +5100,11 @@ def alns_minimize(
                     max_pos_per_route=max_pos_per_route,
                     max_evals_per_task=repair_eval_pt,
                     max_evals_total=repair_eval_total,
-                    preselect_m=preselect_m_eff,
-                    preselect_per_pos_shelves=preselect_per_pos_eff,
-                    strict_construct=repair_strict,
-                    strict_bruteforce_fallback=repair_strict_bruteforce,
-                    require_finite_eval=repair_require_finite,
-                    eval_fail_cost=1e30,
                 )
 
             return routes_new_, place_new_, dname, rname
 
         # ========== ??????????????? destroy+repair ==========
-        evaluator.set_tag("destroy_repair")
         routes_new, place_new, chosen_destroy, chosen_repair = _adaptive_destroy_repair()
 
         # strong_shake ????????????+ ????????????????????????
@@ -6747,58 +5131,20 @@ def alns_minimize(
         # ???v(???routes??????) ???shelf_seq ???????????????????????? routes?????????ws_fixed_seq
         routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
 
-        evaluator.set_tag("gate_eval")
-        cand_obj_fast, cand_details_fast = _cache_eval("fast", evaluator, routes_new, shelf_seq_new, place_new)
+        cand_obj_fast, cand_details_fast = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
 
         cand_obj_fast = float(cand_obj_fast)
         cand_details_fast = dict(cand_details_fast) if isinstance(cand_details_fast, dict) else {}
 
         delta0 = cand_obj_fast - float(cur_obj)
 
-        if very_large_mode and long_run_mode:
-            p_min = 0.10 if turbo_mode else 0.08
-        else:
-            p_min = 0.25 if turbo_mode else 0.22
+        p_min = 0.25 if turbo_mode else 0.22
         gate_delta = -math.log(p_min) * float(T)  # ???3*T
 
         # if current state is infeasible, force heavy local to prioritize repairs
         infeasible_cur = (cur_key != (0, 0, 0))
 
         allow_heavy_local = int(getattr(evaluator, "calls", 0)) < int(eval_budget_heavy_eff)
-        do_balance_move = bool(
-            large_scale_mode
-            and cur_feasible
-            and allow_heavy_local
-            and (stall >= max(18, STAG_WS // 2))
-            and ((it % (20 if very_large_mode else 14)) == 0)
-        )
-        if do_balance_move:
-            evaluator.set_tag("bottleneck_move")
-            if very_large_mode:
-                b_tail_k, b_pos, b_s, b_eval = 3, 3, 2, 4
-            else:
-                b_tail_k, b_pos, b_s, b_eval = 5, 4, 2, 6
-            rb_routes, rb_place, rb_improved, rb_obj = rebalance_bottleneck_route_once(
-                routes=routes_new,
-                place=place_new,
-                shelf_seq=shelf_seq_new,
-                evaluator=evaluator,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init_override=shelf_init,
-                rng=rng,
-                tail_k=b_tail_k,
-                max_pos_samples=b_pos,
-                max_s_samples=b_s,
-                max_evals=b_eval,
-            )
-            if rb_improved and (float(rb_obj) < float(cand_obj_fast) - 1e-9):
-                routes_new, place_new = rb_routes, rb_place
-                evaluator.set_tag("gate_eval")
-                cand_obj_fast, cand_details_fast = _cache_eval("fast", evaluator, routes_new, shelf_seq_new, place_new)
-                cand_obj_fast = float(cand_obj_fast)
-                cand_details_fast = dict(cand_details_fast) if isinstance(cand_details_fast, dict) else {}
-                delta0 = cand_obj_fast - float(cur_obj)
         infeas_force_heavy = bool(
             infeasible_cur and (
                 strong_shake
@@ -6810,21 +5156,7 @@ def alns_minimize(
         )
 
         if fast_feasible_mode:
-            if very_large_mode:
-                if str(chosen_destroy) == "critical_single":
-                    light_stride = 32 if turbo_mode else 36
-                    improve_prob = 0.03
-                else:
-                    light_stride = 22 if turbo_mode else 26
-                    improve_prob = 0.05
-            elif large_scale_mode:
-                if str(chosen_destroy) == "critical_single":
-                    light_stride = 22 if turbo_mode else 25
-                    improve_prob = 0.05
-                else:
-                    light_stride = 16 if turbo_mode else 18
-                    improve_prob = 0.09
-            elif str(chosen_destroy) == "critical_single":
+            if str(chosen_destroy) == "critical_single":
                 light_stride = 15 if turbo_mode else 18
                 improve_prob = 0.08
             else:
@@ -6844,30 +5176,6 @@ def alns_minimize(
                 or infeas_force_heavy
                 or (delta0 <= gate_delta)
             ) and allow_heavy_local
-            if very_large_mode and (not strong_shake):
-                do_heavy_local = bool(do_heavy_local and ((it % (4 if turbo_mode else 3)) == 0))
-            elif large_scale_mode and (not strong_shake):
-                do_heavy_local = bool(do_heavy_local and ((it % 2) == 0))
-
-        if very_large_mode:
-            gamma_now = int(getattr(evaluator, "gamma", 0))
-            if long_run_mode:
-                if strong_shake:
-                    stride_h = 10
-                elif stagnating:
-                    stride_h = 24 if gamma_now > 0 else 20
-                else:
-                    stride_h = 45 if gamma_now > 0 else 36
-            else:
-                if strong_shake:
-                    stride_h = 14
-                elif stagnating:
-                    stride_h = 48 if gamma_now > 0 else 40
-                else:
-                    stride_h = 90 if gamma_now > 0 else 70
-            do_heavy_local = bool(do_heavy_local and ((it % stride_h) == 0))
-            if forced_diversify:
-                do_heavy_local = False
 
         # cand_obj / cand_details ?????? fast ???????????? heavy local??????????????????
         cand_obj = float(cand_obj_fast)
@@ -6878,31 +5186,6 @@ def alns_minimize(
         # -------------- 2) ?????????????????????????????? --------------
         # =====================================================
         if do_heavy_local:
-            evaluator.set_tag("heavy_local")
-            if very_large_mode:
-                cv_trials = 1
-                cv_pos_samples = 4
-                cv_s_samples = 3
-                cv_eval_budget = 4
-                block_trials = 1
-                intra_trials = 1
-                star_trials = 5 if stagnating else 2
-            elif large_scale_mode:
-                cv_trials = 2
-                cv_pos_samples = 6
-                cv_s_samples = 4
-                cv_eval_budget = 6
-                block_trials = 1
-                intra_trials = 1
-                star_trials = 8 if stagnating else 4
-            else:
-                cv_trials = 3
-                cv_pos_samples = 8
-                cv_s_samples = 5
-                cv_eval_budget = 8
-                block_trials = 2
-                intra_trials = 2
-                star_trials = 24 if stagnating else 8
             if rng.random() < P_USE_CROSS_VEHICLE:
                 routes_new_cv, place_new_cv, improved_cv, _ = cross_vehicle_move_once(
                     routes=routes_new,
@@ -6914,10 +5197,10 @@ def alns_minimize(
                     shelf_init_override=shelf_init,
                     rng=rng,
                     try_swap=bool(stagnating or strong_shake),  # ???????????????/??????????????? swap
-                    max_trials=cv_trials,
-                    max_pos_samples=cv_pos_samples,
-                    max_s_samples=cv_s_samples,
-                    max_evals=cv_eval_budget,
+                    max_trials=3,
+                    max_pos_samples=8,
+                    max_s_samples=5,
+                    max_evals=8,
                 )
 
                 if improved_cv:
@@ -6934,42 +5217,13 @@ def alns_minimize(
                     shelf_init_override=shelf_init,
                     rng=rng,
                     max_block=2,
-                    max_trials=block_trials,
+                    max_trials=2,
                 )
                 if improved_blk:
                     routes_new, place_new = routes_blk, place_blk
 
-            p_ejection = float(ejection_chain_prob_eff)
-            if stagnating or strong_shake:
-                p_ejection = min(0.95, max(p_ejection, p_ejection * 1.65))
-            elif very_large_mode and (not long_run_mode):
-                p_ejection = min(p_ejection, 0.08)
-            if enable_ejection_chain_eff and (rng.random() < p_ejection):
-                exact_for_ejection = evaluator_exact_proxy if layering_on else None
-                routes_ej, place_ej, improved_ej, _ = cross_vehicle_ejection_chain_once(
-                    routes=routes_new,
-                    place=place_new,
-                    shelf_seq=cur.shelf_seq,
-                    evaluator=evaluator,
-                    evaluator_exact=exact_for_ejection,
-                    S_near_by_j=S_near_by_j,
-                    task_shelf_mapping=task_shelf_mapping,
-                    shelf_init_override=shelf_init,
-                    rng=rng,
-                    min_seg=ejection_chain_min_seg_eff,
-                    max_seg=ejection_chain_max_seg_eff,
-                    max_trials=(1 if very_large_mode else 2),
-                    max_pos_samples=(2 if very_large_mode else 3),
-                    max_s_samples=(2 if very_large_mode else 3),
-                    max_evals=(2 if very_large_mode else 3),
-                    max_exact_trials=1,
-                    exact_gate_rel=0.003,
-                )
-                if improved_ej:
-                    routes_new, place_new = routes_ej, place_ej
-
             p_star = 0.15 if not stagnating else 0.55
-            trials_star = star_trials
+            trials_star = 8 if not stagnating else 24
             if rng.random() < p_star:
                 routes_star, place_star, improved_star, _ = cross_vehicle_2opt_star_once(
                     routes=routes_new,
@@ -6990,7 +5244,7 @@ def alns_minimize(
                     shelf_seq=cur.shelf_seq,
                     evaluator=evaluator,
                     rng=rng,
-                    max_trials=intra_trials,
+                    max_trials=2,
                 )
                 if improved_2opt:
                     routes_new = routes_new2
@@ -7002,30 +5256,11 @@ def alns_minimize(
                     shelf_seq=cur.shelf_seq,
                     evaluator=evaluator,
                     rng=rng,
-                    max_trials=intra_trials,
+                    max_trials=2,
                     max_block=2,
                 )
                 if improved_or:
                     routes_new = routes_new3
-
-            p_ws_micro = float(ws_micro_reorder_prob_eff)
-            if stagnating:
-                p_ws_micro = min(0.90, max(p_ws_micro, p_ws_micro * 1.45))
-            elif very_large_mode:
-                p_ws_micro = min(p_ws_micro, 0.12)
-            if cur_feasible and enable_ws_micro_reorder_eff and (rng.random() < p_ws_micro):
-                routes_ws, improved_ws, _ = ws_micro_reorder_idle_swap_once(
-                    routes=routes_new,
-                    place=place_new,
-                    shelf_seq=cur.shelf_seq,
-                    evaluator=evaluator,
-                    rng=rng,
-                    max_trials=(6 if very_large_mode else (8 if large_scale_mode else 10)),
-                    max_swap_span=(2 if very_large_mode else 3),
-                    idle_window_cap=(180.0 if very_large_mode else 240.0),
-                )
-                if improved_ws:
-                    routes_new = routes_ws
 
             if stagnating and ((it % 6) == 0):
                 routes_gap, place_gap, improved_gap, _ = intensify_close_largest_ws_gap_once(
@@ -7048,33 +5283,27 @@ def alns_minimize(
             # =====================================================
             # -------------- 3) place tune / shelf tune --------------
             # =====================================================
-            place_tune_on_iter = bool(enable_place_tune)
-            shelf_tune_on_iter = bool(enable_shelf_tune and task_shelf_mapping)
-            if very_large_mode and (not strong_shake):
-                place_tune_on_iter = bool(stagnating and ((it % 120) == 0))
-                shelf_tune_on_iter = bool(stagnating and ((it % 160) == 0))
-
-            if place_tune_on_iter:
+            if enable_place_tune:
                 if strong_shake:
-                    do_tune = ((it % (6 if very_large_mode else (4 if large_scale_mode else 2))) == 0)
-                    global_try = 1 if large_scale_mode else 3
+                    do_tune = ((it % 2) == 0)
+                    global_try = 3
                 elif stagnating:
-                    do_tune = ((it % (10 if very_large_mode else (6 if large_scale_mode else 3))) == 0)
-                    global_try = 1 if large_scale_mode else 2
+                    do_tune = ((it % 3) == 0)
+                    global_try = 2
                 else:
-                    do_tune = ((it % (42 if very_large_mode else (24 if large_scale_mode else 10))) == 0)
+                    do_tune = ((it % 10) == 0)
                     global_try = 0
 
                 if do_tune:
                     if strong_shake:
-                        tune_eval_budget = 24 if very_large_mode else (48 if large_scale_mode else 120)
-                        tune_cap = 14 if very_large_mode else (24 if large_scale_mode else 50)
+                        tune_eval_budget = 120
+                        tune_cap = 50
                     elif stagnating:
-                        tune_eval_budget = 16 if very_large_mode else (32 if large_scale_mode else 80)
-                        tune_cap = 12 if very_large_mode else (20 if large_scale_mode else 45)
+                        tune_eval_budget = 80
+                        tune_cap = 45
                     else:
-                        tune_eval_budget = (8 if turbo_mode else 10) if very_large_mode else ((16 if turbo_mode else 20) if large_scale_mode else (36 if turbo_mode else 45))
-                        tune_cap = 10 if very_large_mode else (16 if large_scale_mode else 36)
+                        tune_eval_budget = 36 if turbo_mode else 45
+                        tune_cap = 36
                     place_new, _ = local_place_tune_once(
                         routes=routes_new,
                         shelf_seq=cur.shelf_seq,
@@ -7093,20 +5322,15 @@ def alns_minimize(
             # ?????? shelf_seq ???????????????shelf_tune ?????????
             shelf_seq_new = cur.shelf_seq
 
-            if shelf_tune_on_iter:
-                if very_large_mode:
-                    do_reloc = strong_shake or (stagnating and ((it % 10) == 0)) or ((it % 40) == 0)
-                elif large_scale_mode:
-                    do_reloc = strong_shake or (stagnating and ((it % 6) == 0)) or ((it % 24) == 0)
-                else:
-                    do_reloc = strong_shake or (stagnating and ((it % 3) == 0)) or ((it % 12) == 0)
+            if enable_shelf_tune and task_shelf_mapping:
+                do_reloc = strong_shake or (stagnating and ((it % 3) == 0)) or ((it % 12) == 0)
                 if do_reloc:
                     if strong_shake:
-                        reloc_eval_budget = 18 if very_large_mode else (35 if large_scale_mode else 70)
+                        reloc_eval_budget = 70
                     elif stagnating:
-                        reloc_eval_budget = 12 if very_large_mode else (24 if large_scale_mode else 45)
+                        reloc_eval_budget = 45
                     else:
-                        reloc_eval_budget = (8 if turbo_mode else 10) if very_large_mode else ((14 if turbo_mode else 18) if large_scale_mode else (24 if turbo_mode else 30))
+                        reloc_eval_budget = 24 if turbo_mode else 30
                     shelf_seq_new, _ = local_shelf_seq_relocate_once(
                         routes=routes_new,
                         shelf_seq=cur.shelf_seq,
@@ -7117,12 +5341,7 @@ def alns_minimize(
                         max_evals=reloc_eval_budget,
                     )
 
-                if very_large_mode:
-                    do_promote = strong_shake or (stagnating and ((it % 12) == 0)) or ((it % 50) == 0)
-                elif large_scale_mode:
-                    do_promote = strong_shake or (stagnating and ((it % 6) == 0)) or ((it % 28) == 0)
-                else:
-                    do_promote = strong_shake or (stagnating and ((it % 2) == 0)) or ((it % 18) == 0)
+                do_promote = strong_shake or (stagnating and ((it % 2) == 0)) or ((it % 18) == 0)
                 if do_promote:
                     shelf_seq_new, _, _ = intensify_shelf_seq_promote_critical_ws_once(
                         routes=routes_new,
@@ -7130,7 +5349,7 @@ def alns_minimize(
                         place=place_new,
                         evaluator=evaluator,
                         rng=rng,
-                        max_trials=(6 if very_large_mode else (10 if large_scale_mode else 14)) if stagnating else (4 if very_large_mode else (6 if large_scale_mode else 8)),
+                        max_trials=14 if stagnating else 8,
                     )
 
             if (it % (30 if turbo_mode else 35)) == 0:
@@ -7197,8 +5416,7 @@ def alns_minimize(
             # heavy local ???????????? routes_new / shelf_seq_new / place_new?????????????????????
             routes_new = _normalize_ws_blocks(routes_new, evaluator)
             routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
-            evaluator.set_tag("post_heavy_eval")
-            cand_obj, cand_details = _cache_eval("fast", evaluator, routes_new, shelf_seq_new, place_new)
+            cand_obj, cand_details = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
 
             cand_obj = float(cand_obj)
             cand_details = dict(cand_details) if isinstance(cand_details, dict) else {}
@@ -7211,16 +5429,15 @@ def alns_minimize(
         stagnating_relabel = bool(
             relabel_when_stagnating
             and stagnating
-            and ((it % (26 if very_large_mode else (14 if large_scale_mode else (10 if turbo_mode else 8)))) == 0)
+            and ((it % (10 if turbo_mode else 8)) == 0)
         )
         strong_relabel = bool(
             relabel_when_strong_shake
             and strong_shake
-            and ((it % (14 if very_large_mode else (9 if large_scale_mode else (5 if turbo_mode else 4)))) == 0)
+            and ((it % (5 if turbo_mode else 4)) == 0)
         )
         do_relabel = bool(periodic_relabel or stagnating_relabel or strong_relabel)
         if do_relabel:
-            evaluator.set_tag("relabel")
             routes_rl, obj_rl = _relabel_best_routes(
                 routes_new,
                 evaluator=evaluator,
@@ -7238,8 +5455,7 @@ def alns_minimize(
                 routes_new = normalize_routes_by_shelf_seq_order(routes_new, shelf_seq_new, task_shelf_mapping)
 
                 # ????????????relabel ?????? routes?????????????????????details?????????SA ?????? cand_key???
-                evaluator.set_tag("relabel_eval")
-                cand_obj, cand_details = _cache_eval("fast", evaluator, routes_new, shelf_seq_new, place_new)
+                cand_obj, cand_details = _safe_evaluate(evaluator, routes_new, shelf_seq_new, place_new)
                 cand_obj = float(cand_obj)
                 cand_details = dict(cand_details) if isinstance(cand_details, dict) else {}
 
@@ -7258,34 +5474,9 @@ def alns_minimize(
         prev_best_obj = float(best_obj)
         prev_best_key = tuple(best_key)
 
-        cand_key = tuple(_safe_infeas_key(cand_details, evaluator, obj=cand_obj))
-        if layering_on and (exact_evals_this_iter < int(max_exact_evals_per_iter_eff)):
-            cand_feas_fast = (tuple(cand_key) == key_feas)
-            exact_gate = False
-            if cand_feas_fast:
-                # Exact eval only for promising feasible candidates.
-                if tuple(prev_cur_key) != key_feas:
-                    exact_gate = True
-                elif float(cand_obj) <= float(prev_cur_obj) + max(1.0, 0.0015 * abs(float(prev_cur_obj))):
-                    exact_gate = True
-                elif (best_feasible is not None) and (
-                    float(cand_obj) <= float(best_feasible_obj) + max(1.0, 0.0015 * abs(float(best_feasible_obj)))
-                ):
-                    exact_gate = True
-            if exact_gate:
-                evaluator_exact_proxy.set_tag("layer_exact")
-                cand_obj_exact, cand_det_exact = _cache_eval("exact", evaluator_exact_proxy, routes_new, shelf_seq_new, place_new)
-                exact_evals_this_iter += 1
-                cand_obj = float(cand_obj_exact)
-                cand_details = dict(cand_det_exact) if isinstance(cand_det_exact, dict) else {}
-                cand_key = tuple(_safe_infeas_key(cand_details, evaluator_exact_proxy, obj=cand_obj))
-
+        cand_key = _safe_infeas_key(cand_details, evaluator, obj=cand_obj)
         cand_feas = (tuple(cand_key) == key_feas)
         prev_cur_feas = (tuple(prev_cur_key) == key_feas)
-        too_uphill_feas = False
-        if prev_cur_feas and cand_feas and math.isfinite(float(prev_cur_obj)) and math.isfinite(float(cand_obj)):
-            rel_up = (float(cand_obj) - float(prev_cur_obj)) / max(1.0, abs(float(prev_cur_obj)))
-            too_uphill_feas = bool(rel_up > float(uphill_rel_cap))
 
         accept = False
         target_hit = False
@@ -7297,8 +5488,6 @@ def alns_minimize(
             elif cand_key == prev_cur_key:
                 if cand_obj < prev_cur_obj - 1e-9:
                     accept = True
-                elif too_uphill_feas:
-                    accept = False
                 else:
                     delta = float(cand_obj) - float(prev_cur_obj)
                     x_obj = -delta / max(1e-9, float(T))
@@ -7314,18 +5503,6 @@ def alns_minimize(
                 # cand infeas ??????
                 if prev_cur_feas:
                     accept = False
-                    # Controlled escape from feasible local minima when search stagnates.
-                    if (stall >= STAG_WS) and (FEAS_ESCAPE_PROB > 0.0):
-                        cur_inf = _safe_infeas_scalar(cur_details, evaluator, obj=cur_obj)
-                        cand_inf = _safe_infeas_scalar(cand_details, evaluator, obj=cand_obj)
-                        allowed_inf = max(1.0, cur_inf) * (1.0 + FEAS_ESCAPE_RELAX)
-                        if cand_inf <= allowed_inf:
-                            esc_prob = min(
-                                FEAS_ESCAPE_PROB,
-                                FEAS_ESCAPE_PROB * (1.0 + 0.02 * max(0, stall - STAG_WS)),
-                            )
-                            if rng.random() < esc_prob:
-                                accept = True
                 else:
                     accept = False
         else:
@@ -7335,8 +5512,6 @@ def alns_minimize(
             elif cand_key == prev_cur_key:
                 if cand_obj < prev_cur_obj - 1e-9:
                     accept = True
-                elif too_uphill_feas:
-                    accept = False
                 else:
                     delta = float(cand_obj) - float(prev_cur_obj)
                     x_obj = -delta / max(1e-9, float(T))
@@ -7372,21 +5547,18 @@ def alns_minimize(
 
             # best ?????????????????????prev_best?????????????????????
             if (cand_key < prev_best_key) or (cand_key == prev_best_key and cand_obj < prev_best_obj - 1e-9):
-                best = _clone_sol(cur)
+                best = copy.deepcopy(cur)
                 best_obj = float(cand_obj)
                 best_key = tuple(cand_key)
                 best_details = dict(cur_details) if isinstance(cur_details, dict) else {}
                 improved_best_this_iter = True
 
             if cand_feas and (cand_obj < best_feasible_obj - 1e-9):
-                best_feasible = _clone_sol(cur)
+                best_feasible = copy.deepcopy(cur)
                 best_feasible_obj = float(cand_obj)
-                _push_elite(float(best_feasible_obj), best_feasible)
 
                 if (target_feasible_obj_eff is not None) and (float(best_feasible_obj) <= float(target_feasible_obj_eff) + 1e-9):
                     target_hit = True
-            elif cand_feas:
-                _push_elite(float(cand_obj), cur)
 
         # =====================================================
         # -------------- 5.5) Adaptive weight update ----------
@@ -7401,15 +5573,14 @@ def alns_minimize(
             elif is_improve_cur:
                 reward = SCORE_IMPROVE
             else:
-                reward = max(0.05, 0.20 * SCORE_ACCEPT)
+                reward = SCORE_ACCEPT
         else:
             reward = SCORE_REJECT
 
-        reward_for_pool = max(0.0, min(float(adaptive_w_max), float(reward) / max(1.0, float(SCORE_IMPROVE))))
         if chosen_destroy is not None:
-            destroy_pool.record(chosen_destroy, reward_for_pool)
+            destroy_pool.record(chosen_destroy, reward)
         if chosen_repair is not None:
-            repair_pool.record(chosen_repair, reward_for_pool)
+            repair_pool.record(chosen_repair, reward)
         if (chosen_destroy is not None) and (chosen_repair is not None):
             pair_key = (str(chosen_destroy), str(chosen_repair))
             target_q = max(0.0, min(1.0, float(reward) / max(1.0, float(SCORE_BEST))))
@@ -7420,7 +5591,7 @@ def alns_minimize(
                 target_q = min(1.0, target_q + 0.20)
             prev_q = float(pair_quality.get(pair_key, 0.0))
             pair_quality[pair_key] = (1.0 - PAIR_REACTION) * prev_q + PAIR_REACTION * target_q
-        if ((it + 1) % max(1, int(adaptive_segment_len_eff)) == 0) and pair_quality:
+        if ((it + 1) % max(1, int(adaptive_segment_len)) == 0) and pair_quality:
             for pk in list(pair_quality.keys()):
                 qv = float(pair_quality.get(pk, 0.0)) * PAIR_DECAY
                 if qv < 1e-6:
@@ -7432,7 +5603,7 @@ def alns_minimize(
         repair_pool.maybe_update(it)
 
         if target_hit:
-            _log(
+            print(
                 f"[ALNS-inner] hit target feasible obj: {float(best_feasible_obj):.2f} <= {float(target_feasible_obj_eff):.2f} at iter {it + 1}"
             )
             break
@@ -7440,8 +5611,7 @@ def alns_minimize(
         # =====================================================
         # -------------- 6) cool & stall --------------
         # =====================================================
-        T *= float(cool_eff)
-        iters_since_best = 0 if improved_best_this_iter else (iters_since_best + 1)
+        T *= float(cool)
         stall = 0 if improved_best_this_iter else (stall + 1)
 
         if stagnating or post_mode:
@@ -7450,62 +5620,37 @@ def alns_minimize(
         if post_shake > 0:
             post_shake -= 1
 
-        if (
-            no_improve_early_stop_on
-            and
-            (effective_iters >= 120)
-            and (not long_run_mode)
-            and ((it + 1) >= int(early_stop_warmup))
-            and (iters_since_best >= int(early_stop_patience))
-            and (best_feasible is not None)
-        ):
-            _log(
-                f"[ALNS-inner] early-stop by no-best-improve: "
-                f"idle={iters_since_best}, iter={it + 1}/{effective_iters}"
-            )
-            break
-
         if (it + 1) % 50 == 0:
-            calls_now = int(getattr(evaluator, "calls", 0))
-            calls_delta = max(0, calls_now - calls_last_report)
-            calls_last_report = calls_now
-            exact_calls_now = int(getattr(evaluator_exact_proxy, "calls", 0))
-            exact_calls_delta = max(0, exact_calls_now - exact_calls_last_report)
-            exact_calls_last_report = exact_calls_now
-            _log(
+            print(
                 f"[ALNS-inner] iter {it + 1}/{iters} | cur={cur_obj:.2f} | "
-                f"best={best_obj:.2f} | stall={stall} | T={T:.4f} | post={post_shake} "
-                f"| dCalls50={calls_delta} | dExact50={exact_calls_delta}"
+                f"best={best_obj:.2f} | stall={stall} | T={T:.4f} | post={post_shake}"
 
             )
-            _log(f"[ALNS-adapt] destroy top = {destroy_pool.topk(4)}")
-            _log(f"[ALNS-adapt] repair  top = {repair_pool.topk(2)}")
+            print(f"[ALNS-adapt] destroy top = {destroy_pool.topk(4)}")
+            print(f"[ALNS-adapt] repair  top = {repair_pool.topk(2)}")
 
 
-    _log(f"[ALNS-inner] best_obj after SA = {best_obj:.2f}")
+    print(f"[ALNS-inner] best_obj after SA = {best_obj:.2f}")
 
     final_sol = best_feasible if (feasible_first and best_feasible is not None) else best
     final_obj = best_feasible_obj if (feasible_first and best_feasible is not None) else best_obj
 
     final_sol.routes = _normalize_ws_blocks(final_sol.routes, evaluator)
-    do_final_relabel = bool((not turbo_mode) and (effective_relabel_interval > 0) and (not very_large_mode))
-    if do_final_relabel:
-        evaluator.set_tag("final_relabel")
-        best_rl, best_rl_obj = _relabel_best_routes(
-            final_sol.routes,
-            evaluator=evaluator,
-            shelf_seq=final_sol.shelf_seq,
-            place=final_sol.place,
-            max_exact_agv=int(relabel_max_exact_agv),
-            eval_top_k=int(effective_relabel_top_k),
-            task_shelf_mapping=task_shelf_mapping,
-            shelf_init_override=shelf_init,
-        )
-        if best_rl_obj < float(final_obj) - 1e-9:
-            final_sol.routes = best_rl
-            final_obj = float(best_rl_obj)
+    best_rl, best_rl_obj = _relabel_best_routes(
+        final_sol.routes,
+        evaluator=evaluator,
+        shelf_seq=final_sol.shelf_seq,
+        place=final_sol.place,
+        max_exact_agv=int(relabel_max_exact_agv),
+        eval_top_k=int(effective_relabel_top_k),
+        task_shelf_mapping=task_shelf_mapping,
+        shelf_init_override=shelf_init,
+    )
+    if best_rl_obj < float(final_obj) - 1e-9:
+        final_sol.routes = best_rl
+        final_obj = float(best_rl_obj)
 
-    final_tail_rounds = 0 if (turbo_mode or large_scale_mode) else 1
+    final_tail_rounds = 0 if turbo_mode else 1
     for _ in range(final_tail_rounds):
         routes_int, place_int, improved_int, obj_int = intensify_critical_tail_once(
             routes=final_sol.routes,
@@ -7523,132 +5668,17 @@ def alns_minimize(
         else:
             break
 
-    # Quality-oriented endgame on large instances: a few exact, high-value moves.
-    if large_scale_mode and math.isfinite(float(final_obj)):
-        no_gain = 0
-        end_rounds = 6 if very_large_mode else 8
-        for rr in range(int(end_rounds)):
-            if no_gain >= 3:
-                break
-            improved_any = False
-
-            evaluator.set_tag("final_balance")
-            rb_routes, rb_place, rb_improved, rb_obj = rebalance_bottleneck_route_once(
-                routes=final_sol.routes,
-                place=final_sol.place,
-                shelf_seq=final_sol.shelf_seq,
-                evaluator=evaluator,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init_override=shelf_init,
-                rng=rng,
-                tail_k=4 if very_large_mode else 6,
-                max_pos_samples=4 if very_large_mode else 6,
-                max_s_samples=2 if very_large_mode else 3,
-                max_evals=6 if very_large_mode else 10,
-            )
-            if rb_improved and (float(rb_obj) < float(final_obj) - 1e-9):
-                final_sol.routes, final_sol.place = rb_routes, rb_place
-                final_obj = float(rb_obj)
-                improved_any = True
-
-            if (rr % 2) == 0 or (not improved_any):
-                evaluator.set_tag("final_2opt")
-                st_routes, st_place, st_improved, st_obj = cross_vehicle_2opt_star_once(
-                    routes=final_sol.routes,
-                    place=final_sol.place,
-                    shelf_seq=final_sol.shelf_seq,
-                    evaluator=evaluator,
-                    rng=rng,
-                    max_trials=6 if very_large_mode else 10,
-                    allow_non_improving=False,
-                )
-                if st_improved and (float(st_obj) < float(final_obj) - 1e-9):
-                    final_sol.routes, final_sol.place = st_routes, st_place
-                    final_obj = float(st_obj)
-                    improved_any = True
-
-            if improved_any:
-                no_gain = 0
-            else:
-                no_gain += 1
-
-    allow_milp_polish = bool(enable_milp_polish_eff and (milp_polish_on_turbo_eff or (not turbo_mode)))
-    if allow_milp_polish and math.isfinite(float(final_obj)):
-        milp_tl = float(milp_polish_time_limit_eff)
-        if t_budget is not None:
-            elapsed_sec = time.perf_counter() - t_start
-            rem_sec = max(0.0, float(t_budget) - float(elapsed_sec))
-            milp_tl = min(float(milp_tl), max(0.0, float(rem_sec) - 0.2))
-        if milp_tl >= 1.0:
-            evaluator_for_milp = evaluator_exact_proxy if layering_on else evaluator
-            milp_sol, milp_obj, milp_key, milp_improved, milp_msg = _try_milp_polish_endgame(
-                final_sol,
-                evaluator=evaluator_for_milp,
-                task_shelf_mapping=task_shelf_mapping,
-                seed=int(seed),
-                time_limit_sec=float(milp_tl),
-                lock_immediate=milp_polish_lock_immediate_eff,
-            )
-            _log(f"[ALNS-milp] {milp_msg}")
-            if milp_improved:
-                final_sol = milp_sol
-                final_obj = float(milp_obj)
-                _log(f"[ALNS-milp] accepted key={milp_key} obj={final_obj:.2f}")
-
-    if layering_on:
-        evaluator_exact_proxy.set_tag("final_exact_recheck")
-        final_obj_exact, final_det_exact = _cache_eval(
-            "exact",
-            evaluator_exact_proxy,
-            final_sol.routes,
-            final_sol.shelf_seq,
-            final_sol.place,
-        )
-        final_key_exact = tuple(_safe_infeas_key(final_det_exact, evaluator_exact_proxy, obj=final_obj_exact))
-        if final_key_exact == key_feas and math.isfinite(float(final_obj_exact)):
-            final_obj = float(final_obj_exact)
-
-    _log(f"[ALNS-inner] final_best_obj = {final_obj:.2f}")
-    _log(f"[ALNS-inner] eval_calls_fast = {int(getattr(evaluator, 'calls', 0))}")
-    if layering_on:
-        _log(f"[ALNS-inner] eval_calls_exact = {int(getattr(evaluator_exact_proxy, 'calls', 0))}")
-    if hasattr(evaluator, "calls_by_tag"):
-        try:
-            top_tags = sorted(
-                [(str(k), int(v)) for k, v in dict(getattr(evaluator, "calls_by_tag", {})).items()],
-                key=lambda kv: kv[1],
-                reverse=True,
-            )
-            _log(f"[ALNS-inner] eval_calls_by_tag_fast_top = {top_tags[:8]}")
-        except Exception:
-            pass
-    if layering_on and hasattr(evaluator_exact_proxy, "calls_by_tag"):
-        try:
-            top_tags_exact = sorted(
-                [(str(k), int(v)) for k, v in dict(getattr(evaluator_exact_proxy, "calls_by_tag", {})).items()],
-                key=lambda kv: kv[1],
-                reverse=True,
-            )
-            _log(f"[ALNS-inner] eval_calls_by_tag_exact_top = {top_tags_exact[:8]}")
-        except Exception:
-            pass
-    if use_eval_cache_eff:
-        _log(
-            f"[ALNS-cache] fast_hit={cache_hits_fast} fast_miss={cache_miss_fast} "
-            f"exact_hit={cache_hits_exact} exact_miss={cache_miss_exact} "
-            f"fast_size={len(cache_fast)} exact_size={len(cache_exact)}"
-        )
+    print(f"[ALNS-inner] final_best_obj = {final_obj:.2f}")
+    print(f"[ALNS-inner] eval_calls = {int(getattr(evaluator, 'calls', 0))}")
     # ?????????????????????????????????????????? routes ???shelf_seq ??????????????? ws_fixed_seq???    final_sol.routes = _normalize_ws_blocks(final_sol.routes, evaluator)
     final_sol.routes = normalize_routes_by_shelf_seq_order(final_sol.routes, final_sol.shelf_seq, task_shelf_mapping)
-    if bool(verbose_eff):
-        _ = basic_feasibility_check_level0(
-            routes=final_sol.routes,
-            shelf_seq=final_sol.shelf_seq,
-            place=final_sol.place,
-            evaluator=(evaluator_exact_proxy if layering_on else evaluator),
-            task_shelf_mapping=task_shelf_mapping,
-            verbose=True,
-        )
+    _ = basic_feasibility_check_level0(
+        routes=final_sol.routes,
+        shelf_seq=final_sol.shelf_seq,
+        place=final_sol.place,
+        evaluator=evaluator,
+        task_shelf_mapping=task_shelf_mapping,
+        verbose=True,
+    )
     return final_sol
 

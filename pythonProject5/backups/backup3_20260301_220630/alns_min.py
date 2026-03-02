@@ -1,9 +1,7 @@
 ﻿from __future__ import annotations
 
 import copy
-import json
 import math
-import os
 import random
 import time
 from itertools import permutations
@@ -3373,289 +3371,6 @@ def cross_vehicle_block_move_once(
     return routes, place, False, float(base_obj)
 
 
-def cross_vehicle_ejection_chain_once(
-    *,
-    routes: Dict[int, List[int]],
-    place: Dict[int, int],
-    shelf_seq: Dict[int, List[int]],
-    evaluator: RobustEvaluator,
-    evaluator_exact: Optional[RobustEvaluator],
-    S_near_by_j: Dict[int, List[int]],
-    task_shelf_mapping: Optional[Dict[int, int]],
-    shelf_init_override: Optional[Dict[int, int]],
-    rng: random.Random,
-    min_seg: int = 6,
-    max_seg: int = 15,
-    max_trials: int = 1,
-    max_pos_samples: int = 3,
-    max_s_samples: int = 2,
-    max_evals: int = 3,
-    max_exact_trials: int = 1,
-    exact_gate_rel: float = 0.003,
-) -> Tuple[Dict[int, List[int]], Dict[int, int], bool, float]:
-    """
-    Large-segment cross-vehicle ejection-chain:
-      1) move a long segment from donor route A -> receiver route B
-      2) eject a shorter segment from B -> another route C
-      3) exact-gate only for clearly promising candidates
-    """
-    routes = _dc_routes(routes)
-    place = _dc_place(place)
-    routes_norm = _normalize_ws_blocks(routes, evaluator)
-    base_obj, _ = evaluator.evaluate(routes_norm, shelf_seq, place)
-    base_obj = float(base_obj)
-
-    base_exact: Optional[float] = None
-    if evaluator_exact is not None:
-        try:
-            base_exact_v, _ = evaluator_exact.evaluate(routes_norm, shelf_seq, place)
-            base_exact = float(base_exact_v)
-            if not math.isfinite(float(base_exact)):
-                base_exact = None
-        except Exception:
-            base_exact = None
-
-    R_ids = sorted(int(r) for r in evaluator.R)
-    seg_min_eff = max(2, int(min_seg))
-    seg_max_eff = max(seg_min_eff, int(max_seg))
-    if len(R_ids) < 2:
-        return routes_norm, place, False, base_obj
-    donor_ids = [int(r) for r in R_ids if len(routes_norm.get(int(r), [])) >= seg_min_eff]
-    if not donor_ids:
-        return routes_norm, place, False, base_obj
-
-    pre = build_rule_prechecker(
-        evaluator=evaluator,
-        shelf_seq=shelf_seq,
-        task_shelf_mapping=task_shelf_mapping,
-        shelf_init_override=shelf_init_override,
-    )
-    proxy = FastProxyEvaluatorLB(evaluator, pre)
-
-    def _sample_positions(seq: List[int], k: int) -> List[int]:
-        all_pos = _ws_block_boundary_positions(seq, evaluator.pi)
-        all_pos = sorted(set(int(p) for p in all_pos))
-        if len(all_pos) <= int(k):
-            return all_pos
-        must = [0, len(seq)]
-        mid = [int(p) for p in all_pos if int(p) not in set(must)]
-        need = max(0, int(k) - len(set(must)))
-        pick = rng.sample(mid, min(need, len(mid))) if (need > 0 and mid) else []
-        return sorted(set(int(x) for x in (must + pick)))
-
-    cand_pool: List[Tuple[float, Dict[int, List[int]], Dict[int, int]]] = []
-    for _ in range(max(1, int(max_trials))):
-        r_from = int(rng.choice(donor_ids))
-        seq_from = [int(x) for x in (routes_norm.get(int(r_from), []) or [])]
-        if len(seq_from) < seg_min_eff:
-            continue
-        r_to = int(rng.choice([r for r in R_ids if int(r) != int(r_from)]))
-        seq_to = [int(x) for x in (routes_norm.get(int(r_to), []) or [])]
-
-        seg_hi = min(seg_max_eff, len(seq_from))
-        if seg_hi < seg_min_eff:
-            continue
-        seg_len = int(rng.randint(seg_min_eff, seg_hi))
-        i0 = int(rng.randrange(0, len(seq_from) - seg_len + 1))
-        moved_block = [int(x) for x in seq_from[i0 : i0 + seg_len]]
-        seq_from_rem = [int(x) for x in (seq_from[:i0] + seq_from[i0 + seg_len :])]
-
-        r_back_choices = [int(r) for r in R_ids if int(r) != int(r_to)]
-        if not r_back_choices:
-            continue
-
-        pos_to_cands = _sample_positions(seq_to, max(2, int(max_pos_samples)))
-        for pos_to in pos_to_cands:
-            pos_to = int(pos_to)
-            seq_to_ins = list(seq_to)
-            for off, jj in enumerate(moved_block):
-                seq_to_ins.insert(int(pos_to) + int(off), int(jj))
-
-            if len(seq_to_ins) <= 2:
-                continue
-            e_len_hi = min(max(2, seg_len // 2), len(seq_to_ins) - 1)
-            e_len_lo = 2
-            if e_len_hi < e_len_lo:
-                continue
-            e_len = int(rng.randint(e_len_lo, e_len_hi))
-            ins_lo = int(pos_to)
-            ins_hi = int(pos_to + seg_len - 1)
-            e_starts = [
-                int(st)
-                for st in range(0, len(seq_to_ins) - e_len + 1)
-                if ((int(st) + e_len - 1) < ins_lo) or (int(st) > ins_hi)
-            ]
-            if not e_starts:
-                continue
-            e_start = int(rng.choice(e_starts))
-            ejected = [int(x) for x in seq_to_ins[e_start : e_start + e_len]]
-            seq_to_fin = [int(x) for x in (seq_to_ins[:e_start] + seq_to_ins[e_start + e_len :])]
-
-            r_back = min(r_back_choices, key=lambda rr: len(routes_norm.get(int(rr), [])))
-            if rng.random() < 0.35:
-                r_back = int(rng.choice(r_back_choices))
-            seq_back = [int(x) for x in (routes_norm.get(int(r_back), []) or [])]
-            pos_back_cands = _sample_positions(seq_back, max(2, int(max_pos_samples) - 1))
-            pos_back = int(rng.choice(pos_back_cands))
-            seq_back_new = list(seq_back)
-            for off, jj in enumerate(ejected):
-                seq_back_new.insert(int(pos_back) + int(off), int(jj))
-
-            cand_routes = _dc_routes(routes_norm)
-            cand_routes[int(r_from)] = _normalize_one_route_ws_blocks(seq_from_rem, evaluator)
-            cand_routes[int(r_to)] = _normalize_one_route_ws_blocks(seq_to_fin, evaluator)
-            cand_routes[int(r_back)] = _normalize_one_route_ws_blocks(seq_back_new, evaluator)
-            cand_routes = _normalize_ws_blocks(cand_routes, evaluator)
-
-            moved_tasks = set(int(x) for x in moved_block)
-            moved_tasks.update(int(x) for x in ejected)
-            cand_place = _dc_place(place)
-            for jj in moved_tasks:
-                s_cands = _cand_end_shelves_for_task(
-                    int(jj),
-                    place=cand_place,
-                    S_near_by_j=S_near_by_j,
-                    evaluator=evaluator,
-                    shelf_seq=shelf_seq,
-                    task_shelf_mapping=task_shelf_mapping,
-                    shelf_init_override=shelf_init_override,
-                    must_include_prev_or_init=True,
-                    max_keep=max(6, int(max_s_samples) * 2),
-                )
-                s_cands = _augment_shelf_candidates(
-                    int(jj),
-                    s_cands,
-                    evaluator=evaluator,
-                    rng=rng,
-                    force_all_shelves=False,
-                    extra_random_shelves=0,
-                    cap_total=max(8, int(max_s_samples) + 2),
-                )
-                if not s_cands:
-                    continue
-                keep = [int(x) for x in s_cands[: max(1, int(max_s_samples))]]
-                pick_s = int(keep[0])
-                if len(keep) >= 2 and rng.random() < 0.28:
-                    pick_s = int(rng.choice(keep))
-                cand_place[int(jj)] = int(pick_s)
-
-            lb = proxy.solution_lb(
-                routes=cand_routes,
-                place=cand_place,
-                stop_at=base_obj if math.isfinite(base_obj) else None,
-            )
-            if math.isfinite(base_obj) and (float(lb) >= float(base_obj) - 1e-9):
-                continue
-            cand_pool.append((float(lb), cand_routes, cand_place))
-
-    if not cand_pool:
-        return routes_norm, place, False, base_obj
-    cand_pool.sort(key=lambda x: x[0])
-
-    eval_k = min(max(1, int(max_evals)), len(cand_pool))
-    exact_limit = max(0, int(max_exact_trials))
-    exact_used = 0
-    gate_abs = max(1.0, abs(float(base_obj)) * max(0.0, float(exact_gate_rel)))
-    for idx in range(eval_k):
-        _, rr, pp = cand_pool[idx]
-        obj_fast, _ = evaluator.evaluate(rr, shelf_seq, pp)
-        obj_fast = float(obj_fast)
-        if not (obj_fast < float(base_obj) - 1e-9):
-            continue
-
-        need_exact = bool(
-            (evaluator_exact is not None)
-            and (exact_used < exact_limit)
-            and (obj_fast <= float(base_obj) - float(gate_abs))
-        )
-        if need_exact:
-            exact_used += 1
-            obj_exact, _ = evaluator_exact.evaluate(rr, shelf_seq, pp)
-            obj_exact = float(obj_exact)
-            if base_exact is None:
-                if math.isfinite(obj_exact):
-                    return rr, pp, True, obj_exact
-            elif math.isfinite(obj_exact) and (obj_exact < float(base_exact) - 1e-9):
-                return rr, pp, True, obj_exact
-            continue
-
-        return rr, pp, True, obj_fast
-
-    return routes_norm, place, False, base_obj
-
-
-def ws_micro_reorder_idle_swap_once(
-    *,
-    routes: Dict[int, List[int]],
-    place: Dict[int, int],
-    shelf_seq: Dict[int, List[int]],
-    evaluator: RobustEvaluator,
-    rng: random.Random,
-    max_trials: int = 8,
-    max_swap_span: int = 3,
-    idle_window_cap: float = 240.0,
-) -> Tuple[Dict[int, List[int]], bool, float]:
-    """
-    WS-neighborhood micro reorder:
-      - swap two nearby tasks only when their q-time gap is within idle_window_cap
-      - keep operation tiny (adjacent/nearby) to preserve feasibility robustness
-    """
-    routes = _dc_routes(routes)
-    routes_norm = _normalize_ws_blocks(routes, evaluator)
-    base_obj, diag = evaluator.evaluate(routes_norm, shelf_seq, place)
-    base_obj = float(base_obj)
-    if not math.isfinite(base_obj):
-        return routes_norm, False, base_obj
-
-    q_map = (diag.get("q", {}) if isinstance(diag, dict) else {}) or {}
-    pi = getattr(evaluator, "pi", {}) or {}
-    route_ids = [int(r) for r in evaluator.R if len(routes_norm.get(int(r), [])) >= 2]
-    if not route_ids:
-        return routes_norm, False, base_obj
-
-    span_eff = max(1, int(max_swap_span))
-    window_eff = max(0.0, float(idle_window_cap))
-    for _ in range(max(1, int(max_trials))):
-        r = int(rng.choice(route_ids))
-        seq = [int(x) for x in (routes_norm.get(int(r), []) or [])]
-        if len(seq) < 2:
-            continue
-
-        i = int(rng.randrange(0, len(seq) - 1))
-        j_hi = min(len(seq) - 1, int(i + span_eff))
-        if j_hi <= i:
-            continue
-        j = int(rng.randint(i + 1, j_hi))
-        a = int(seq[i])
-        b = int(seq[j])
-        if int(pi.get(a, -1)) == int(pi.get(b, -1)):
-            continue
-
-        qa = q_map.get(int(a), None)
-        qb = q_map.get(int(b), None)
-        if (qa is not None) and (qb is not None):
-            try:
-                if abs(float(qa) - float(qb)) > window_eff:
-                    continue
-            except Exception:
-                pass
-
-        cand_seq = list(seq)
-        cand_seq[i], cand_seq[j] = cand_seq[j], cand_seq[i]
-        cand_seq = _normalize_one_route_ws_blocks(cand_seq, evaluator)
-        if cand_seq == seq:
-            continue
-
-        cand_routes = _dc_routes(routes_norm)
-        cand_routes[int(r)] = cand_seq
-        cand_obj, _ = evaluator.evaluate(cand_routes, shelf_seq, place)
-        cand_obj = float(cand_obj)
-        if cand_obj < base_obj - 1e-9:
-            return cand_routes, True, cand_obj
-
-    return routes_norm, False, base_obj
-
-
 def intra_two_opt_once(
     *,
     routes: Dict[int, List[int]],
@@ -5189,368 +4904,6 @@ def repair_chain_violations_by_route_relink(
             cur.place[int(cur_j)] = int(cur.place[int(prev_j)])
 
     return best
-
-
-def _build_milp_warm_hint_from_solution(
-    *,
-    routes: Dict[int, List[int]],
-    shelf_seq: Dict[int, List[int]],
-    place: Dict[int, int],
-    evaluator: RobustEvaluator,
-) -> Dict[str, Any]:
-    j_set = set(int(x) for x in (getattr(evaluator, "J", set()) or set()))
-    s_set = set(int(x) for x in (getattr(evaluator, "S", {}).keys() or []))
-    j0 = _as_int_int_dict(getattr(evaluator, "J0", {}) or {})
-    jd = _as_int_int_dict(getattr(evaluator, "Jd", {}) or {})
-    j_i = _as_int_int_dict(getattr(evaluator, "J_I", {}) or {})
-
-    w_map: Dict[int, int] = {}
-    z_list: List[Tuple[int, int, int]] = []
-
-    for r_raw, seq_raw in (routes or {}).items():
-        try:
-            r = int(r_raw)
-        except Exception:
-            continue
-        seq = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-        if not seq:
-            continue
-
-        for j in seq:
-            w_map[int(j)] = int(r)
-
-        j0_r = j0.get(int(r), None)
-        jd_r = jd.get(int(r), None)
-        prev = int(j0_r) if j0_r is not None else None
-        for j in seq:
-            if prev is not None:
-                z_list.append((int(prev), int(j), int(r)))
-            prev = int(j)
-        if prev is not None and (jd_r is not None):
-            z_list.append((int(prev), int(jd_r), int(r)))
-
-    x_map: Dict[int, int] = {}
-    for j_raw, s_raw in (place or {}).items():
-        try:
-            j = int(j_raw)
-            s = int(s_raw)
-        except Exception:
-            continue
-        if (j in j_set) and (s in s_set):
-            x_map[int(j)] = int(s)
-
-    imm_list: List[Tuple[int, int, int]] = []
-    for c_raw, seq_raw in (shelf_seq or {}).items():
-        try:
-            c = int(c_raw)
-        except Exception:
-            continue
-        vt = j_i.get(int(c), None)
-        if vt is None:
-            continue
-        seq = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-        if not seq:
-            continue
-        imm_list.append((int(vt), int(seq[0]), int(c)))
-        for a, b in zip(seq[:-1], seq[1:]):
-            imm_list.append((int(a), int(b), int(c)))
-
-    return {
-        "w": w_map,
-        "z": z_list,
-        "x": x_map,
-        "immediate": imm_list,
-    }
-
-
-def _load_milp_bundle_solution(
-    bundle_path: str,
-    *,
-    evaluator: RobustEvaluator,
-) -> Optional[Tuple[Dict[int, List[int]], Dict[int, List[int]], Dict[int, int]]]:
-    if (not bundle_path) or (not os.path.exists(bundle_path)):
-        return None
-    try:
-        with open(bundle_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return None
-
-    j_set = set(int(x) for x in (getattr(evaluator, "J", set()) or set()))
-    s_set = set(int(x) for x in (getattr(evaluator, "S", {}).keys() or []))
-
-    routes_raw = data.get("routes", {}) if isinstance(data, dict) else {}
-    shelf_raw = data.get("shelf_seq", {}) if isinstance(data, dict) else {}
-    place_raw = data.get("place", {}) if isinstance(data, dict) else {}
-
-    if not isinstance(routes_raw, dict):
-        return None
-
-    routes: Dict[int, List[int]] = {}
-    for r_raw, seq_raw in routes_raw.items():
-        try:
-            r = int(r_raw)
-        except Exception:
-            continue
-        routes[int(r)] = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-
-    shelf_seq: Dict[int, List[int]] = {}
-    if isinstance(shelf_raw, dict):
-        for c_raw, seq_raw in shelf_raw.items():
-            try:
-                c = int(c_raw)
-            except Exception:
-                continue
-            shelf_seq[int(c)] = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-
-    place: Dict[int, int] = {}
-    if isinstance(place_raw, dict):
-        for j_raw, s_raw in place_raw.items():
-            try:
-                j = int(j_raw)
-                s = int(s_raw)
-            except Exception:
-                continue
-            if (j in j_set) and (s in s_set):
-                place[int(j)] = int(s)
-
-    return routes, shelf_seq, place
-
-
-def _try_milp_polish_endgame(
-    sol,
-    *,
-    evaluator: RobustEvaluator,
-    task_shelf_mapping: Optional[Dict[int, int]],
-    seed: int,
-    time_limit_sec: float,
-    lock_immediate: bool = True,
-) -> Tuple[Any, float, Tuple[int, int, int], bool, str]:
-    base_sol = copy.deepcopy(sol)
-    base_sol.routes = _dc_routes(getattr(base_sol, "routes", {}) or {})
-    base_sol.place = _dc_place(getattr(base_sol, "place", {}) or {})
-    base_sol.shelf_seq = _dc_shelf_seq(getattr(base_sol, "shelf_seq", {}) or {})
-
-    clean_map = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=False)
-    base_sol.routes = _normalize_ws_blocks(base_sol.routes, evaluator)
-    base_sol.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-        base_sol.shelf_seq,
-        evaluator=evaluator,
-        task_shelf_mapping=clean_map,
-    )
-    base_sol.routes = normalize_routes_by_shelf_seq_order(base_sol.routes, base_sol.shelf_seq, clean_map)
-
-    base_obj, base_det = _safe_evaluate(evaluator, base_sol.routes, base_sol.shelf_seq, base_sol.place)
-    base_obj = float(base_obj)
-    base_key = tuple(_safe_infeas_key(base_det, evaluator, obj=base_obj))
-
-    tl = float(time_limit_sec or 0.0)
-    if tl <= 0.0:
-        return base_sol, base_obj, base_key, False, "skip(time_limit<=0)"
-    if (not math.isfinite(base_obj)) or (base_key != (0, 0, 0)):
-        return base_sol, base_obj, base_key, False, "skip(base_not_feasible)"
-
-    required_attrs = [
-        "J",
-        "R",
-        "S",
-        "pi",
-        "D",
-        "J0",
-        "Jd",
-        "J_I",
-        "shelf_init",
-        "agv_init",
-        "d_s_pi",
-        "d_pi_s",
-        "d_s_s",
-        "ws_fixed_seq",
-    ]
-    missing_attrs = [nm for nm in required_attrs if not hasattr(evaluator, nm)]
-    if missing_attrs:
-        miss = ",".join(str(x) for x in missing_attrs[:6])
-        return base_sol, base_obj, base_key, False, f"skip(missing_eval_attrs:{miss})"
-
-    try:
-        import optimization_model
-        from gurobipy import GRB
-    except Exception as e:
-        return base_sol, base_obj, base_key, False, f"skip(milp_import:{type(e).__name__})"
-
-    j_set = set(int(x) for x in (getattr(evaluator, "J", set()) or set()))
-    if not j_set:
-        return base_sol, base_obj, base_key, False, "skip(empty_J)"
-
-    s_map_raw = getattr(evaluator, "S", {}) or {}
-    if not isinstance(s_map_raw, dict) or (not s_map_raw):
-        return base_sol, base_obj, base_key, False, "skip(empty_S)"
-    s_map = {int(s): v for s, v in s_map_raw.items()}
-
-    agv_init = _as_int_int_dict(getattr(evaluator, "agv_init", {}) or {})
-    r_raw = getattr(evaluator, "R", {}) or {}
-    if isinstance(r_raw, dict):
-        r_map = {int(r): r_raw[r] for r in r_raw.keys()}
-    else:
-        fallback_cell = next(iter(s_map.keys()))
-        r_ids = sorted(int(x) for x in (r_raw or []))
-        r_map = {int(r): int(agv_init.get(int(r), fallback_cell)) for r in r_ids}
-    if not r_map:
-        return base_sol, base_obj, base_key, False, "skip(empty_R)"
-
-    pi = _as_int_int_dict(getattr(evaluator, "pi", {}) or {})
-    if len(pi) < len(j_set):
-        return base_sol, base_obj, base_key, False, "skip(pi_incomplete)"
-    d_src = getattr(evaluator, "D", {}) or {}
-    d_map: Dict[int, float] = {}
-    for j in j_set:
-        try:
-            d_map[int(j)] = float(d_src[int(j)])
-        except Exception:
-            continue
-    if len(d_map) != len(j_set):
-        return base_sol, base_obj, base_key, False, "skip(D_incomplete)"
-
-    j0 = _as_int_int_dict(getattr(evaluator, "J0", {}) or {})
-    jd = _as_int_int_dict(getattr(evaluator, "Jd", {}) or {})
-    j_i = _as_int_int_dict(getattr(evaluator, "J_I", {}) or {})
-    shelf_data = _as_int_int_dict(getattr(evaluator, "shelf_init", {}) or {})
-    ws_fixed_seq = _dc_shelf_seq(getattr(evaluator, "ws_fixed_seq", {}) or {})
-    d_s_pi = {tuple(map(int, k)): float(v) for k, v in (getattr(evaluator, "d_s_pi", {}) or {}).items()}
-    d_pi_s = {tuple(map(int, k)): float(v) for k, v in (getattr(evaluator, "d_pi_s", {}) or {}).items()}
-    d_s_s = {tuple(map(int, k)): float(v) for k, v in (getattr(evaluator, "d_s_s", {}) or {}).items()}
-
-    if not j0 or not jd or not j_i or not shelf_data or not agv_init:
-        return base_sol, base_obj, base_key, False, "skip(core_maps_empty)"
-
-    task_shelf_map = _build_chain_of_map(base_sol.shelf_seq, clean_map)
-    task_shelf_map = {int(j): int(c) for j, c in task_shelf_map.items() if int(j) in j_set}
-    for c_raw, seq_raw in (base_sol.shelf_seq or {}).items():
-        try:
-            c = int(c_raw)
-        except Exception:
-            continue
-        for j in (seq_raw or []):
-            jj = int(j)
-            if jj in j_set and jj not in task_shelf_map:
-                task_shelf_map[int(jj)] = int(c)
-    if len(task_shelf_map) != len(j_set):
-        return base_sol, base_obj, base_key, False, "skip(task_shelf_map_incomplete)"
-
-    warm_hint = _build_milp_warm_hint_from_solution(
-        routes=base_sol.routes,
-        shelf_seq=base_sol.shelf_seq,
-        place=base_sol.place,
-        evaluator=evaluator,
-    )
-    warm_hint["cmax"] = float(base_obj)
-
-    shelf_ids = set(int(x) for x in shelf_data.keys())
-    used_shelves = set(int(c) for c in task_shelf_map.values())
-    unused_shelves = set(int(sid) for sid in shelf_ids if sid not in used_shelves)
-    shelf_virtual_tasks = {int(sid): int(j_i[int(sid)]) for sid in shelf_ids if int(sid) in j_i}
-    j_i_si: Dict[int, int] = {}
-    for c_raw, seq_raw in (base_sol.shelf_seq or {}).items():
-        try:
-            c = int(c_raw)
-        except Exception:
-            continue
-        seq = [int(x) for x in (seq_raw or []) if int(x) in j_set]
-        if seq:
-            j_i_si[int(c)] = int(seq[0])
-
-    tasks = {int(j): (int(pi[int(j)]), float(d_map[int(j)]), None, None) for j in sorted(j_set)}
-    gamma_now = int(getattr(evaluator, "gamma", 0) or 0)
-    stamp = int(time.time() * 1000) % 1_000_000_000
-    file_prefix = f"alns_milp_polish_g{gamma_now}_s{int(seed)}_{stamp}"
-    bundle_path = os.path.join(
-        os.path.dirname(__file__),
-        "solution_exports",
-        f"{file_prefix}_bundle_gamma{gamma_now}.json",
-    )
-
-    lock_hint = {"immediate": True} if bool(lock_immediate) else None
-
-    try:
-        _, model, _, _ = optimization_model.optimize_warehouse(
-            R=r_map,
-            S=s_map,
-            K={},
-            tasks=tasks,
-            AGV_positions=dict(agv_init),
-            agv_positions_map={},
-            bj={},
-            hj={},
-            map_obj=None,
-            task_shelf_mapping=task_shelf_map,
-            J_I=j_i,
-            J_E=set(),
-            J=j_set,
-            J0=j0,
-            Jd=jd,
-            J_I_SI=j_i_si,
-            shelf_data=shelf_data,
-            agv_data=agv_init,
-            shelf_virtual_tasks=shelf_virtual_tasks,
-            unused_shelves=unused_shelves,
-            file_prefix=file_prefix,
-            gamma_budget=gamma_now,
-            ws_fixed_seq=ws_fixed_seq,
-            warm_start=None,
-            warm_hint=warm_hint,
-            lock_hint=lock_hint,
-            d_s_pi_in=d_s_pi,
-            d_pi_s_in=d_pi_s,
-            d_s_s_in=d_s_s,
-            time_limit=float(tl),
-            no_improve_limit=min(90.0, float(tl)),
-            bridge_quiet=True,
-        )
-    except Exception as e:
-        return base_sol, base_obj, base_key, False, f"error(milp_run:{type(e).__name__})"
-
-    sol_count = int(getattr(model, "SolCount", 0))
-    status = int(getattr(model, "Status", -1))
-    if sol_count <= 0:
-        return base_sol, base_obj, base_key, False, f"no_incumbent(status={status})"
-
-    loaded = _load_milp_bundle_solution(bundle_path, evaluator=evaluator)
-    if loaded is None:
-        return base_sol, base_obj, base_key, False, f"no_bundle(status={status})"
-
-    routes_c, shelf_seq_c, place_c = loaded
-    if not shelf_seq_c:
-        shelf_seq_c = _dc_shelf_seq(base_sol.shelf_seq)
-    for j in j_set:
-        if int(j) not in place_c and int(j) in base_sol.place:
-            place_c[int(j)] = int(base_sol.place[int(j)])
-
-    shelf_seq_c = _ensure_shelf_seq_covers_all_tasks(
-        shelf_seq_c,
-        evaluator=evaluator,
-        task_shelf_mapping=clean_map,
-    )
-    routes_c = _normalize_ws_blocks(routes_c, evaluator)
-    routes_c = normalize_routes_by_shelf_seq_order(routes_c, shelf_seq_c, clean_map)
-
-    cand_obj, cand_det = _safe_evaluate(evaluator, routes_c, shelf_seq_c, place_c)
-    cand_obj = float(cand_obj)
-    cand_key = tuple(_safe_infeas_key(cand_det, evaluator, obj=cand_obj))
-
-    improved = bool((cand_key < base_key) or (cand_key == base_key and cand_obj < base_obj - 1e-9))
-    if not improved:
-        obj_txt = f"{cand_obj:.2f}" if math.isfinite(cand_obj) else "inf"
-        base_txt = f"{base_obj:.2f}" if math.isfinite(base_obj) else "inf"
-        return base_sol, base_obj, base_key, False, f"no_gain(status={status}, obj={base_txt}->{obj_txt})"
-
-    out_sol = copy.deepcopy(base_sol)
-    out_sol.routes = _dc_routes(routes_c)
-    out_sol.shelf_seq = _dc_shelf_seq(shelf_seq_c)
-    out_sol.place = _dc_place(place_c)
-
-    stat_name = "OPTIMAL" if status == int(GRB.OPTIMAL) else ("TIME_LIMIT" if status == int(GRB.TIME_LIMIT) else str(status))
-    return out_sol, cand_obj, cand_key, True, f"improved({stat_name}: {base_obj:.2f}->{cand_obj:.2f})"
-
-
 # =========================
 #         ALNS main
 # =========================
@@ -5593,29 +4946,16 @@ def alns_minimize(
     eval_budget_total: Optional[int] = None,
     eval_budget_heavy: Optional[int] = None,
     target_feasible_obj: Optional[float] = None,
-    feasible_escape_prob: float = 0.04,
-    feasible_escape_relax: float = 2.00,
     eval_layering: int = 0,
     max_exact_evals_per_iter: int = 1,
     use_eval_cache: int = 0,
     eval_cache_maxsize: int = 50000,
     use_shallow_copy: int = 0,
     verbose: bool = False,
-    enable_ejection_chain: int = 1,
-    ejection_chain_prob: float = 0.12,
-    ejection_chain_min_seg: int = 6,
-    ejection_chain_max_seg: int = 15,
-    enable_ws_micro_reorder: int = 1,
-    ws_micro_reorder_prob: float = 0.16,
-    enable_milp_polish: int = 0,
-    milp_polish_time_limit_sec: float = 30.0,
-    milp_polish_lock_immediate: int = 1,
-    milp_polish_on_turbo: int = 0,
 ):
     assert S_near_by_j is not None, "????????????S_near_by_j ????????????????????????"
     rng = random.Random(seed)
-    verbose_eff = bool(verbose)
-    task_shelf_mapping = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=verbose_eff)
+    task_shelf_mapping = _sanitize_task_shelf_mapping(task_shelf_mapping, verbose=True)
     profile = str(speed_profile or "balanced").strip().lower()
     turbo_mode = profile in {"turbo", "fast", "speed"}
     if (not strong_init_time_budget_sec) or (float(strong_init_time_budget_sec) <= 0.0):
@@ -5631,22 +4971,10 @@ def alns_minimize(
             t_budget = None
     if t_budget is not None and t_budget <= 0.0:
         t_budget = None
+    verbose_eff = bool(verbose)
     use_eval_cache_eff = bool(int(use_eval_cache or 0) == 1)
     use_shallow_copy_eff = bool(int(use_shallow_copy or 0) == 1)
     eval_cache_maxsize_eff = max(1000, int(eval_cache_maxsize or 0))
-    enable_ejection_chain_eff = bool(int(enable_ejection_chain or 0) == 1)
-    ejection_chain_prob_eff = min(1.0, max(0.0, float(ejection_chain_prob or 0.0)))
-    ejection_chain_min_seg_eff = max(2, int(ejection_chain_min_seg or 2))
-    ejection_chain_max_seg_eff = max(ejection_chain_min_seg_eff, int(ejection_chain_max_seg or ejection_chain_min_seg_eff))
-    enable_ws_micro_reorder_eff = bool(int(enable_ws_micro_reorder or 0) == 1)
-    ws_micro_reorder_prob_eff = min(1.0, max(0.0, float(ws_micro_reorder_prob or 0.0)))
-    enable_milp_polish_eff = bool(int(enable_milp_polish or 0) == 1)
-    try:
-        milp_polish_time_limit_eff = max(0.0, float(milp_polish_time_limit_sec or 0.0))
-    except Exception:
-        milp_polish_time_limit_eff = 0.0
-    milp_polish_lock_immediate_eff = bool(int(milp_polish_lock_immediate or 0) == 1)
-    milp_polish_on_turbo_eff = bool(int(milp_polish_on_turbo or 0) == 1)
 
     def _log(msg: str) -> None:
         if verbose_eff:
@@ -5833,63 +5161,8 @@ def alns_minimize(
     best_obj, best_details = _cache_eval("fast", evaluator, best.routes, best.shelf_seq, best.place)
 
     best_obj = float(best_obj)
-    best_key = tuple(_safe_infeas_key(best_details, evaluator, obj=best_obj))
+    best_key = _safe_infeas_key(best_details, evaluator, obj=best_obj)
     key_feas = (0, 0, 0)
-
-    # Fallback only when initial solution is infeasible:
-    # try deterministic from-scratch seeds to avoid all-inf restarts.
-    if tuple(best_key) != key_feas:
-        fallback_pool: List[Tuple[str, object]] = []
-        try:
-            rr_seed = build_ws_round_robin_seed(
-                best,
-                evaluator=evaluator,
-                task_shelf_mapping=task_shelf_mapping,
-            )
-            fallback_pool.append(("ws_round_robin", rr_seed))
-        except Exception as e:
-            _log(f"[ALNS-init] ws_round_robin seed failed: {type(e).__name__}: {e}")
-        try:
-            safe_seed = build_safe_chain_ws_seed(
-                best,
-                evaluator_exact=base_evaluator_exact,
-                S_near_by_j=S_near_by_j,
-                task_shelf_mapping=task_shelf_mapping,
-                shelf_init=shelf_init,
-                seed=int(seed),
-                tries=(24 if n_tasks > 30 else 12),
-            )
-            fallback_pool.append(("safe_chain_ws", safe_seed))
-        except Exception as e:
-            _log(f"[ALNS-init] safe_chain_ws seed failed: {type(e).__name__}: {e}")
-
-        for seed_tag, seed_sol in fallback_pool:
-            cand = _clone_sol(seed_sol)
-            cand.routes = _dc_routes(cand.routes)
-            cand.place = _dc_place(cand.place)
-            cand.shelf_seq = _ensure_shelf_seq_covers_all_tasks(
-                _dc_shelf_seq(cand.shelf_seq),
-                evaluator=evaluator,
-                task_shelf_mapping=task_shelf_mapping,
-            )
-            cand.routes = _normalize_ws_blocks(cand.routes, evaluator)
-            cand.routes = normalize_routes_by_shelf_seq_order(cand.routes, cand.shelf_seq, task_shelf_mapping)
-
-            evaluator.set_tag(f"init_recover_{seed_tag}")
-            cand_obj, cand_details = _cache_eval("fast", evaluator, cand.routes, cand.shelf_seq, cand.place)
-            cand_obj = float(cand_obj)
-            cand_key = tuple(_safe_infeas_key(cand_details, evaluator, obj=cand_obj))
-
-            if (tuple(cand_key) < tuple(best_key)) or (
-                tuple(cand_key) == tuple(best_key) and (cand_obj < float(best_obj) - 1e-9)
-            ):
-                best = _clone_sol(cand)
-                best_obj = float(cand_obj)
-                best_details = dict(cand_details) if isinstance(cand_details, dict) else {}
-                best_key = tuple(cand_key)
-                _log(f"[ALNS-init] recovered better seed via {seed_tag}: key={best_key}, obj={best_obj:.2f}")
-            if tuple(best_key) == key_feas:
-                break
 
     best_feasible = _clone_sol(best) if tuple(best_key) == key_feas else None
     best_feasible_obj = float(best_obj) if tuple(best_key) == key_feas else float("inf")
@@ -5996,7 +5269,6 @@ def alns_minimize(
     PAIR_EPS = 0.08
     PAIR_DECAY = 0.995
     pair_quality: Dict[Tuple[str, str], float] = defaultdict(float)
-    long_run_mode = bool(int(iters) >= 2000)
 
     # destroy?????????????????????????????????
     P_DESTROY_RANDOM_SMALL = 0.40
@@ -6005,17 +5277,10 @@ def alns_minimize(
 
     # ??????????????????????????????
     if very_large_mode:
-        if long_run_mode:
-            # Borrow the older "260222" aggressive idea for long runs on huge instances.
-            P_USE_CROSS_VEHICLE = 0.30
-            P_USE_CROSS_BLOCK = 0.12
-            P_USE_INTRA_2OPT = 0.20
-            P_USE_INTRA_OROPT = 0.18
-        else:
-            P_USE_CROSS_VEHICLE = 0.16
-            P_USE_CROSS_BLOCK = 0.05
-            P_USE_INTRA_2OPT = 0.08
-            P_USE_INTRA_OROPT = 0.08
+        P_USE_CROSS_VEHICLE = 0.16
+        P_USE_CROSS_BLOCK = 0.05
+        P_USE_INTRA_2OPT = 0.08
+        P_USE_INTRA_OROPT = 0.08
     elif large_scale_mode:
         P_USE_CROSS_VEHICLE = 0.28
         P_USE_CROSS_BLOCK = 0.12
@@ -6029,7 +5294,7 @@ def alns_minimize(
 
     # ??????????????????????????????
     if very_large_mode:
-        STAG_WS = 44 if long_run_mode else 55
+        STAG_WS = 55
         STAG_LIMIT = 120
     elif large_scale_mode:
         STAG_WS = 48
@@ -6038,8 +5303,6 @@ def alns_minimize(
         STAG_WS = 40
         STAG_LIMIT = 120
     P_WS_FOCUSED = 0.70
-    FEAS_ESCAPE_PROB = max(0.0, min(0.25, float(feasible_escape_prob)))
-    FEAS_ESCAPE_RELAX = max(0.0, float(feasible_escape_relax))
 
     # ????????????????????????
     REHEAT_SOFT = max(2.50, 0.45 * float(T))
@@ -6120,11 +5383,6 @@ def alns_minimize(
             f"[ALNS-inner] init already reaches target feasible obj <= {float(target_feasible_obj_eff):.2f}; skip iterations."
         )
         effective_iters = 0
-
-    no_improve_early_stop_on = True
-    if very_large_mode and int(getattr(evaluator, "gamma", 0)) == 0 and int(effective_iters) <= 1500:
-        # Gamma=0 short/medium runs are often warm-started near-feasible; avoid stopping too early.
-        no_improve_early_stop_on = False
 
     calls_last_report = int(getattr(evaluator, "calls", 0))
     exact_calls_last_report = int(getattr(evaluator_exact_proxy, "calls", 0))
@@ -6265,15 +5523,6 @@ def alns_minimize(
             else:
                 repair_evals_per_task = 14 if turbo_mode else 10
                 repair_evals_total = 80 if turbo_mode else 55
-
-        if very_large_mode and long_run_mode:
-            # In long runs, keep repair search a bit deeper to avoid early-quality plateau.
-            if fast_feasible_mode:
-                repair_evals_per_task = max(repair_evals_per_task, 3 if turbo_mode else 2)
-                repair_evals_total = max(repair_evals_total, 14 if turbo_mode else 10)
-            elif stagnating:
-                repair_evals_per_task = max(repair_evals_per_task, 9 if turbo_mode else 7)
-                repair_evals_total = max(repair_evals_total, 54 if turbo_mode else 40)
 
         # =====================================================
         # -------------- 1) destroy + repair --------------
@@ -6755,10 +6004,7 @@ def alns_minimize(
 
         delta0 = cand_obj_fast - float(cur_obj)
 
-        if very_large_mode and long_run_mode:
-            p_min = 0.10 if turbo_mode else 0.08
-        else:
-            p_min = 0.25 if turbo_mode else 0.22
+        p_min = 0.25 if turbo_mode else 0.22
         gate_delta = -math.log(p_min) * float(T)  # ???3*T
 
         # if current state is infeasible, force heavy local to prioritize repairs
@@ -6851,20 +6097,12 @@ def alns_minimize(
 
         if very_large_mode:
             gamma_now = int(getattr(evaluator, "gamma", 0))
-            if long_run_mode:
-                if strong_shake:
-                    stride_h = 10
-                elif stagnating:
-                    stride_h = 24 if gamma_now > 0 else 20
-                else:
-                    stride_h = 45 if gamma_now > 0 else 36
+            if strong_shake:
+                stride_h = 14
+            elif stagnating:
+                stride_h = 48 if gamma_now > 0 else 40
             else:
-                if strong_shake:
-                    stride_h = 14
-                elif stagnating:
-                    stride_h = 48 if gamma_now > 0 else 40
-                else:
-                    stride_h = 90 if gamma_now > 0 else 70
+                stride_h = 90 if gamma_now > 0 else 70
             do_heavy_local = bool(do_heavy_local and ((it % stride_h) == 0))
             if forced_diversify:
                 do_heavy_local = False
@@ -6939,35 +6177,6 @@ def alns_minimize(
                 if improved_blk:
                     routes_new, place_new = routes_blk, place_blk
 
-            p_ejection = float(ejection_chain_prob_eff)
-            if stagnating or strong_shake:
-                p_ejection = min(0.95, max(p_ejection, p_ejection * 1.65))
-            elif very_large_mode and (not long_run_mode):
-                p_ejection = min(p_ejection, 0.08)
-            if enable_ejection_chain_eff and (rng.random() < p_ejection):
-                exact_for_ejection = evaluator_exact_proxy if layering_on else None
-                routes_ej, place_ej, improved_ej, _ = cross_vehicle_ejection_chain_once(
-                    routes=routes_new,
-                    place=place_new,
-                    shelf_seq=cur.shelf_seq,
-                    evaluator=evaluator,
-                    evaluator_exact=exact_for_ejection,
-                    S_near_by_j=S_near_by_j,
-                    task_shelf_mapping=task_shelf_mapping,
-                    shelf_init_override=shelf_init,
-                    rng=rng,
-                    min_seg=ejection_chain_min_seg_eff,
-                    max_seg=ejection_chain_max_seg_eff,
-                    max_trials=(1 if very_large_mode else 2),
-                    max_pos_samples=(2 if very_large_mode else 3),
-                    max_s_samples=(2 if very_large_mode else 3),
-                    max_evals=(2 if very_large_mode else 3),
-                    max_exact_trials=1,
-                    exact_gate_rel=0.003,
-                )
-                if improved_ej:
-                    routes_new, place_new = routes_ej, place_ej
-
             p_star = 0.15 if not stagnating else 0.55
             trials_star = star_trials
             if rng.random() < p_star:
@@ -7007,25 +6216,6 @@ def alns_minimize(
                 )
                 if improved_or:
                     routes_new = routes_new3
-
-            p_ws_micro = float(ws_micro_reorder_prob_eff)
-            if stagnating:
-                p_ws_micro = min(0.90, max(p_ws_micro, p_ws_micro * 1.45))
-            elif very_large_mode:
-                p_ws_micro = min(p_ws_micro, 0.12)
-            if cur_feasible and enable_ws_micro_reorder_eff and (rng.random() < p_ws_micro):
-                routes_ws, improved_ws, _ = ws_micro_reorder_idle_swap_once(
-                    routes=routes_new,
-                    place=place_new,
-                    shelf_seq=cur.shelf_seq,
-                    evaluator=evaluator,
-                    rng=rng,
-                    max_trials=(6 if very_large_mode else (8 if large_scale_mode else 10)),
-                    max_swap_span=(2 if very_large_mode else 3),
-                    idle_window_cap=(180.0 if very_large_mode else 240.0),
-                )
-                if improved_ws:
-                    routes_new = routes_ws
 
             if stagnating and ((it % 6) == 0):
                 routes_gap, place_gap, improved_gap, _ = intensify_close_largest_ws_gap_once(
@@ -7314,18 +6504,6 @@ def alns_minimize(
                 # cand infeas ??????
                 if prev_cur_feas:
                     accept = False
-                    # Controlled escape from feasible local minima when search stagnates.
-                    if (stall >= STAG_WS) and (FEAS_ESCAPE_PROB > 0.0):
-                        cur_inf = _safe_infeas_scalar(cur_details, evaluator, obj=cur_obj)
-                        cand_inf = _safe_infeas_scalar(cand_details, evaluator, obj=cand_obj)
-                        allowed_inf = max(1.0, cur_inf) * (1.0 + FEAS_ESCAPE_RELAX)
-                        if cand_inf <= allowed_inf:
-                            esc_prob = min(
-                                FEAS_ESCAPE_PROB,
-                                FEAS_ESCAPE_PROB * (1.0 + 0.02 * max(0, stall - STAG_WS)),
-                            )
-                            if rng.random() < esc_prob:
-                                accept = True
                 else:
                     accept = False
         else:
@@ -7451,10 +6629,7 @@ def alns_minimize(
             post_shake -= 1
 
         if (
-            no_improve_early_stop_on
-            and
             (effective_iters >= 120)
-            and (not long_run_mode)
             and ((it + 1) >= int(early_stop_warmup))
             and (iters_since_best >= int(early_stop_patience))
             and (best_feasible is not None)
@@ -7573,29 +6748,6 @@ def alns_minimize(
             else:
                 no_gain += 1
 
-    allow_milp_polish = bool(enable_milp_polish_eff and (milp_polish_on_turbo_eff or (not turbo_mode)))
-    if allow_milp_polish and math.isfinite(float(final_obj)):
-        milp_tl = float(milp_polish_time_limit_eff)
-        if t_budget is not None:
-            elapsed_sec = time.perf_counter() - t_start
-            rem_sec = max(0.0, float(t_budget) - float(elapsed_sec))
-            milp_tl = min(float(milp_tl), max(0.0, float(rem_sec) - 0.2))
-        if milp_tl >= 1.0:
-            evaluator_for_milp = evaluator_exact_proxy if layering_on else evaluator
-            milp_sol, milp_obj, milp_key, milp_improved, milp_msg = _try_milp_polish_endgame(
-                final_sol,
-                evaluator=evaluator_for_milp,
-                task_shelf_mapping=task_shelf_mapping,
-                seed=int(seed),
-                time_limit_sec=float(milp_tl),
-                lock_immediate=milp_polish_lock_immediate_eff,
-            )
-            _log(f"[ALNS-milp] {milp_msg}")
-            if milp_improved:
-                final_sol = milp_sol
-                final_obj = float(milp_obj)
-                _log(f"[ALNS-milp] accepted key={milp_key} obj={final_obj:.2f}")
-
     if layering_on:
         evaluator_exact_proxy.set_tag("final_exact_recheck")
         final_obj_exact, final_det_exact = _cache_eval(
@@ -7641,14 +6793,13 @@ def alns_minimize(
         )
     # ?????????????????????????????????????????? routes ???shelf_seq ??????????????? ws_fixed_seq???    final_sol.routes = _normalize_ws_blocks(final_sol.routes, evaluator)
     final_sol.routes = normalize_routes_by_shelf_seq_order(final_sol.routes, final_sol.shelf_seq, task_shelf_mapping)
-    if bool(verbose_eff):
-        _ = basic_feasibility_check_level0(
-            routes=final_sol.routes,
-            shelf_seq=final_sol.shelf_seq,
-            place=final_sol.place,
-            evaluator=(evaluator_exact_proxy if layering_on else evaluator),
-            task_shelf_mapping=task_shelf_mapping,
-            verbose=True,
-        )
+    _ = basic_feasibility_check_level0(
+        routes=final_sol.routes,
+        shelf_seq=final_sol.shelf_seq,
+        place=final_sol.place,
+        evaluator=(evaluator_exact_proxy if layering_on else evaluator),
+        task_shelf_mapping=task_shelf_mapping,
+        verbose=bool(verbose_eff),
+    )
     return final_sol
 
